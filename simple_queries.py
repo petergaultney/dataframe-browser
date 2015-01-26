@@ -156,7 +156,8 @@ def browse_dataframes(df_browser):
                         print('Merging current dataframe ' + current_name + ' with ' + tok)
                         try:
                             current_df = df_browser.smart_merge(current_df, tok)
-                        except:
+                        except Exception as e:
+                            print(e)
                             print('Could not merge ' + current_name + ' with ' + tok)
                             df_stack.pop()
                     except:

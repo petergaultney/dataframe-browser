@@ -1,28 +1,45 @@
 import pandas as pd
 
-class SmartFrame(object):
-    def __init__(self, df, suffix):
-        self.df = df
-        self.suffix = suffix
-        self.foreign_keys = dict()
-    def _add_foreign_key(self, dfid, foreign_key):
-        self.foreign_keys[dfid] = foreign_key
-    # it's not really a 'smart' frame until you add a smart merge.
-    def add_foreign_key(self, df, foreign_key):
-        self._add_foreign_key(id(df), foreign_key)
-    def __getitem__(self, df):
-        return self.get_foreign_key(df)
-    def get_foreign_key(self, df):
-        return self._get_foreign_key_by_id(id(df))
-    def _get_foreign_key_by_id(self, df_id):
-        return self.foreign_keys[df_id]
-    def __contains__(self, key):
-        if id(key) in self.foreign_keys:
-            return True
-        else:
-            return False
+# smart frame functions (to make dataframes themselves 'smart')
+def is_smart_frame(df):
+    return hasattr(df, '__sf_is_smart_frame')
+def make_df_smart(df, suffix):
+    try:
+        if is_smart_frame(df):
+            print('WHOA THIS DATAFRAME IS ALREADY SMART')
+            return df
+    except:
+        pass
+    # okay, so it isn't already a 'smart' frame.
+    df.__sf_suffix = suffix
+    df.__sf_foreign_keys = dict()
+    df.__sf_is_smart_frame = True
+    df._metadata.append('__sf_suffix')
+    df._metadata.append('__sf_foreign_keys')
+    df._metadata.append('__sf_is_smart_frame')
+    return df
 
-class DataFrameBrowser(object):
+def suffix(smart_df):
+    return smart_df.__sf_suffix
+def fkeys(smart_df): # foreign key
+    return smart_df.__sf_foreign_keys
+
+def get_fkey_for_dfid(smart_df, target_df_id):
+    return fkeys(smart_df)[target_df_id]
+def get_fkey(smart_df, target_df):
+    return get_fkey_for_dfid(smart_df, id(target_df))
+    
+def add_fkey_for_dfid(smart_df, target_df_id, fkey):
+    fkeys(smart_df)[target_df_id] = fkey
+def add_fkey(smart_df, target_df, fkey): # gets id and passes along
+    add_fkey_for_dfid(smart_df, id(target_df), fkey)
+
+def sf_has_target(smart_df, target_df):
+    if id(target_df) in fkeys(smart_df):
+        return True
+    return False
+    
+class DataFrameSmartMerger(object):
     def __init__(self):
         self._smart_frames = dict()
         self._names_of_dfs_known_to_be_smart = dict()
@@ -35,12 +52,12 @@ class DataFrameBrowser(object):
         if name in self._smart_frames:
             print('WARNING: Overwriting known smart frame!!!!!')
             # TODO: fix up all references and/or disallow this
-        self._smart_frames[name] = SmartFrame(df, suffix)
+        self._smart_frames[name] = make_df_smart(df, suffix)
         self._names_of_dfs_known_to_be_smart[id(df)] = name
         # print('Adding smart frame ' + name + ' with id ' + str(id(df)))
     # this just gets a dataframe by name
     def __getitem__(self, name):
-        return self._smart_frames[name].df
+        return self._smart_frames[name]
     def _convert_to_name(self, df_or_name):
         # if it isn't a name, it's a dataframe and can be reverse-lookuped
         try:
@@ -69,7 +86,7 @@ class DataFrameBrowser(object):
             return None
     def _get_df_if_known_name(self, df):
         try:
-            return self._smart_frames[df].df
+            return self._smart_frames[df]
         except:
             # hopefully this is already a dataframe
             return df
@@ -82,7 +99,13 @@ class DataFrameBrowser(object):
         #     df_name,
         #     self._get_best_printable_name(smart_frame.df)))
         sf_list = self._smart_frames_which_have_a_foreign_key_for_this_dfid[df_id]
-        if smart_frame not in sf_list:
+        sf_id = id(smart_frame)
+        contains = False
+        for item in sf_list:
+            iid = id(item)
+            if iid == sf_id:
+                contains = True
+        if contains:
             self._smart_frames_which_have_a_foreign_key_for_this_dfid[df_id].append(smart_frame)
         else:
             # it's possible that two dataframes which can both be merged
@@ -107,7 +130,7 @@ class DataFrameBrowser(object):
             # with the new merged name. But for now we'll leave this as-is.
             
             # print("WARNING - this smart frame {} has already been added for df {}".format(
-            #     self._get_best_printable_name(smart_frame.df), df_name))
+            #     self._get_best_printable_name(smart_frame), df_name))
             pass
 
     # Registering a smart merge means declaring that the first dataframe
@@ -128,7 +151,7 @@ class DataFrameBrowser(object):
         # print('I declare that df ' + self._get_best_printable_name(smart_frame.df)
         #       + ' has an attribute ' + foreign_key + ' that allows it to join to '
         #       + self._get_best_printable_name(df_id) + '\'s primary key')
-        smart_frame._add_foreign_key(df_id, foreign_key)
+        add_fkey_for_dfid(smart_frame, df_id, foreign_key)
         self._add_reverse_smart_merge(df_id, smart_frame)
         
     # As long as one of these is a dataframe or dataframe name that is known
@@ -136,22 +159,29 @@ class DataFrameBrowser(object):
     # registered smart merge for the other dataframe, this should return
     # a merged dataframe.
     def smart_merge(self, df1, df2, name_callback=None,
-                    id_callback=None, suffix_callback=None):
+                    id_callback=None, suffix_callback=None, preferred_df_to_suffix=None):
         if df1 is None or df1 is None:
             # just die immediately. it's not worth dealing with this later
             self[df1]
             self[df2]
-        
+
+        # when we get to a merge, we assume unless told otherwise that
+        # the caller wants df columns with matching names to be suffixed
+        # only in the names of df2. 
+        if preferred_df_to_suffix is None or (id(preferred_df_to_suffix) != id(df1) and 
+                                              id(preferred_df_to_suffix) != id(df2)):
+            preferred_df_to_suffix = df2
+
         smart_frame_1 = self._get_smart_frame(df1)
         smart_frame_2 = self._get_smart_frame(df2)
         # we expect df1 to be a smart frame and therefore possibly the foreign key holder
-        if smart_frame_2 and not smart_frame_1:
+        if smart_frame_2 is not None and smart_frame_1 is None:
             # print('### performing swap, because df1 is not "smart" at all')
             # if it isn't a smart frame at all, but df2 is, we swap
             temp = smart_frame_1
             smart_frame_1 = smart_frame_2
             smart_frame_2 = temp
-        elif not smart_frame_1 and not smart_frame_2:
+        elif smart_frame_1 is None and smart_frame_2 is None:
             # TODO: we don't even have a smart frame. use new smart frame callbacks!
             # (for now, we just die by trying and failing to 'get' df1)
             print(df1, df2)
@@ -164,31 +194,31 @@ class DataFrameBrowser(object):
         #
         # Therefore we should not be using 'df1' anymore
         df1 = None
-        if smart_frame_2:
+        if smart_frame_2 is not None:
             # df2 may have been a known name instead of a df, so assign the actual dataframe
-            df2 = smart_frame_2.df
+            df2 = smart_frame_2
 
         # we give preference to the first smart frame, if there are two
-        if df2 in smart_frame_1:
+        if sf_has_target(smart_frame_1, df2):
             smart_frame_w_fkey = smart_frame_1
             df_w_primkey = df2
-            if smart_frame_2:
+            if smart_frame_2 is not None:
                 smart_frame_w_primkey = smart_frame_2
-        elif smart_frame_2 and smart_frame_1.df in smart_frame_2:
+        elif smart_frame_2 is not None and sf_has_target(smart_frame_2, smart_frame_1):
             smart_frame_w_fkey = smart_frame_2
             smart_frame_w_primkey = smart_frame_1
-            df_w_primkey = smart_frame_w_primkey.df
+            df_w_primkey = smart_frame_w_primkey
         else:
             # we don't know how to merge these either direction
             # TODO: so perform 'merge clarification callback'
             # (but for now we just raise an exception)
             print('we dont know how to merge these in either direction')
-            smart_frame_1[df2]
+            get_fkey(smart_frame_1, df2)
             # EARLY DEATH
 
         # get shortcut names for easier printing
         df_w_primkey_name = self._get_best_printable_name(df_w_primkey)
-        df_w_fkey_name = self._get_best_printable_name(smart_frame_w_fkey.df)
+        df_w_fkey_name = self._get_best_printable_name(smart_frame_w_fkey)
             
         #
         # past here, we should not refer to anything except in terms of w_primkey and w_fkey
@@ -205,13 +235,23 @@ class DataFrameBrowser(object):
         # but is it really a duplicate? maybe not...
         
         # now that we KNOW which direction to merge and how, so DO MERGE!
-        foreign_key = smart_frame_w_fkey[df_w_primkey]
+        foreign_key = get_fkey(smart_frame_w_fkey, df_w_primkey)
         # print('### merging {} with {}\'s primary key using fkey {}'.format(
         #     df_w_fkey_name, df_w_primkey_name, foreign_key))
-        # no suffix for primkey side, as it is assumed that only one side will ever need a suffix
-        merged = smart_frame_w_fkey.df.merge(df_w_primkey,
-                                             left_on=foreign_key, right_index=True,
-                                             suffixes=(smart_frame_w_fkey.suffix, ''))
+
+        if id(preferred_df_to_suffix) == id(smart_frame_w_fkey):
+            merged = smart_frame_w_fkey.merge(df_w_primkey,
+                                              left_on=foreign_key, right_index=True,
+                                              suffixes=(suffix(smart_frame_w_fkey), ''))
+        elif id(preferred_df_to_suffix) == id(df_w_primkey) and is_smart_frame(df_w_primkey):
+            merged = smart_frame_w_fkey.merge(df_w_primkey,
+                                              left_on=foreign_key, right_index=True,
+                                              suffixes=('', suffix(df_w_primkey)))
+        else:
+            merged = smart_frame_w_fkey.merge(df_w_primkey,
+                                              left_on=foreign_key, right_index=True,
+                                              suffixes=(suffix(smart_frame_w_fkey),
+                                                        suffix(df_w_primkey)))
 
         # now we need to do bookkeeping and record any new known smart merges
         # add the new merged dataframe as a smart frame, since it's based on at least one smart frame
@@ -221,15 +261,15 @@ class DataFrameBrowser(object):
 
         # print('add available foreign keys of foreign_key df to merged df smart frame')
         # add available foreign keys of component dfs to merged df
-        for df_id in smart_frame_w_fkey.foreign_keys.keys():
-            fkey = smart_frame_w_fkey.foreign_keys[df_id]
+        for df_id in fkeys(smart_frame_w_fkey).keys():
+            fkey = fkeys(smart_frame_w_fkey)[df_id]
             if fkey == foreign_key:
                 continue # we just merged on this, so it can't be merged on for the new df
             self._register_smart_merge(merged_smart_frame, fkey, df_id)
         # print('add available foreign keys of primary key df to merged df')
-        if smart_frame_w_primkey:
-            for df_id in smart_frame_w_primkey.foreign_keys.keys():
-                fkey = smart_frame_w_primkey.foreign_keys[df_id]
+        if smart_frame_w_primkey is not None:
+            for df_id in fkeys(smart_frame_w_primkey).keys():
+                fkey = fkeys(smart_frame_w_primkey)[df_id]
                 # we shouldn't have reuse in here, because we didn't use these
                 self._register_smart_merge(merged_smart_frame, fkey, df_id)
         # now add available foreign keys of  smart frames
@@ -241,7 +281,7 @@ class DataFrameBrowser(object):
         if df_primkey_id in self._smart_frames_which_have_a_foreign_key_for_this_dfid:
             smart_frames_which_know_this_df_id = self._smart_frames_which_have_a_foreign_key_for_this_dfid[df_primkey_id]
             for smart_frame in smart_frames_which_know_this_df_id:
-                the_fkey = smart_frame._get_foreign_key_by_id(df_primkey_id)
+                the_fkey = get_fkey_for_dfid(smart_frame, df_primkey_id)
                 if the_fkey == foreign_key:
                     # print('skipping fkey {} possessed by {} because it disappeared in this merge'.format(
                     #     the_fkey, self._get_best_printable_name(smart_frame)))
@@ -249,12 +289,12 @@ class DataFrameBrowser(object):
                 self._register_smart_merge(smart_frame,
                                            the_fkey,
                                            merged_id)
-        df_fkey_id = id(smart_frame_w_fkey.df)
+        df_fkey_id = id(smart_frame_w_fkey)
         # print('add available foreign keys of smart frames that know how to merge into the foreignkey df')
         if df_fkey_id in self._smart_frames_which_have_a_foreign_key_for_this_dfid:
             smart_frames_which_know_this_df_id = self._smart_frames_which_have_a_foreign_key_for_this_dfid[df_fkey_id]
             for smart_frame in smart_frames_which_know_this_df_id:
-                the_fkey = smart_frame._get_foreign_key_by_id(df_fkey_id)
+                the_fkey = get_fkey_for_dfid(smart_frame, df_fkey_id)
                 if the_fkey == foreign_key:
                     # print('skipping fkey {} possessed by {} because it disappeared in this merge'.format(
                     #     the_fkey, self._get_best_printable_name(smart_frame)))
