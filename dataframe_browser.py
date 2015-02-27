@@ -58,6 +58,8 @@ class DataFrameSmartMerger(object):
     # this just gets a dataframe by name
     def __getitem__(self, name):
         return self._smart_frames[name]
+    def __iter__(self):
+        return iter(self._smart_frames.keys())
     def _convert_to_name(self, df_or_name):
         # if it isn't a name, it's a dataframe and can be reverse-lookuped
         try:
@@ -154,6 +156,11 @@ class DataFrameSmartMerger(object):
         add_fkey_for_dfid(smart_frame, df_id, foreign_key)
         self._add_reverse_smart_merge(df_id, smart_frame)
         
+    def get_known_names(self):
+        return self._smart_frames.keys()
+    def get_known_name(self, df):
+        return self._names_of_dfs_known_to_be_smart[id(df)]
+
     # As long as one of these is a dataframe or dataframe name that is known
     # by the DataFrameBrowser, and as long as that smart frame has a
     # registered smart merge for the other dataframe, this should return
@@ -304,8 +311,5 @@ class DataFrameSmartMerger(object):
                                            merged_id)
         
         return merged
-    def get_known_names(self):
-        return self._smart_frames.keys()
-    def get_known_name(self, df):
-        return self._names_of_dfs_known_to_be_smart[id(df)]
+
 

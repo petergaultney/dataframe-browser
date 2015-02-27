@@ -65,6 +65,8 @@ class Minibuffer(urwid.WidgetWrap):
         self.text.set_caption('add column: ')
         self.browser.frame.focus_position = 'footer'
         self.enter_cb = None
+    def _get_focus(self):
+        self.browser.frame.focus_position = 'footer'
     def merge(self, completion_cb=None):
         self.text.setCompletionMethod(completion_cb)
         self.text.set_caption('merge with: ')
@@ -122,8 +124,9 @@ def remove_column_by_index(columns, index):
     return columns
     
 class UrwidDFColumnView(urwid.WidgetWrap):
-    def __init__(self, browser):
+    def __init__(self, browser, col_viewer):
         self.browser = browser
+        self.col_viewer = col_viewer
         self.cols = urwid.Columns([], dividechars=1)
         self.top_row = 0
         urwid.WidgetWrap.__init__(self, self.cols)
@@ -164,7 +167,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
                 idx = self.cols.focus_position
         except: # if for some reason cols.focus_position doesn't exist at all...
             idx = 0
-        self.browser.add_col(col_name, idx)
+        return self.browser.add_col(col_name, idx)
             
     def remove_col(self):
         return self.browser.remove_col_by_index(self.cols.focus_position)
@@ -176,7 +179,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
                 num = 9
             self.set_focus(num)
         elif key == 'm':
-            urwid_browser.mini.merge(urwid_utils.ListCompleter(list    
+            urwid_browser.mini.merge(urwid_utils.ListCompleter(list(self.browser.smerge)))
         elif key == 'r':
             self.remove_col()
         elif key == 's':
@@ -229,6 +232,10 @@ class DFBrowser(object):
     def _msg_cbs(self):
         for cb in self.change_cbs:
             cb(self)
+
+    def sort_cols(self, columns):
+        pass
+        
         
     def merge_df(self, new_df):
         if self.df is None:
