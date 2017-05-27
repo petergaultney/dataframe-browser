@@ -21,7 +21,10 @@ def st():
 
 def end(name):
     global start_times
-    print(name + ' ' + str(timeit.default_timer() - start_times.pop()))
+    elapsed_time = timeit.default_timer() - start_times.pop()
+    if elapsed_time > 5:
+        print('\n')
+    print('{:20} {:10.2f} ms'.format(name, elapsed_time * 1000))
 #end debug stuff
 
 # this stuff captures Ctrl-C
@@ -31,48 +34,72 @@ def end(name):
 
 def generate_str_for_col(df, col_name, top_row=0, bot_row=None):
     if not bot_row:
-        bot_row = len(df) - 1 # TODO
+        bot_row = len(df) # TODO
     string = df[[col_name]].iloc[top_row:bot_row].to_string(index=False)
-    return string.split('\n')
+    all_strs = string.split('\n')
+    assert len(all_strs[0].strip()) != 0 # need a non-blank column label
+    while len(all_strs[1].strip()) == 0:
+        del all_strs[1]
+    assert len(all_strs) - 1 == len(df)
+    return all_strs
 
 def _pack(columns): # this just exists to cut down code bloat
     return columns.options(width_type='pack')
+def _given(columns, nc):
+    return columns.options('given', nc)
 
 # displays a dataframe either in the provided cols object, replacing the contents,
 # or in a new object, if no cols object provided
-def disp_df_in_cols(df, dcols, cached_col_strs, top_row=0, fp=None, cols=None):
-    if len(start_times) > 0:
-        end('kp to kp')
+def disp_df_in_cols(cols, df, dcols, cached_col_strs, top_row, focus_row):
+    end('kp to kp')
     st()
     st()
-    if fp is None:
-        try:
-            fp = cols.focus_position
-        except:
-            fp = 0
-    if cols is not None: # side effect
-        del cols.contents[:]
-    else:
-        cols = urwid.Columns([], dividechars=1)
+    # if focus_col is None:
+    try:
+        focus_col = cols.focus_position
+    except:
+        focus_col = 0
+    del cols.contents[:]
 
+    top_row += 1 # hack to display column name
+    focus_row += 1
     for idx, col in enumerate(dcols):
         disp_attr = 'def'
-        try:
-            if idx == fp:
-                disp_attr = 'active_col'
-        except:
-            pass
+        if idx == focus_col:
+            disp_attr = 'active_col'
         if col not in cached_col_strs:
             cached_col_strs[col] = generate_str_for_col(df, col)
-        df_str = '\n'.join(cached_col_strs[col][top_row:top_row + 70])
-        # else:
-        #     df_str = df[[col]].iloc[top_row:top_row+50].to_string(index=False)
+        bot_row = top_row + 70 # TODO arbitrary constant
 
-        cols.contents.append(
-            (urwid.AttrMap(SelectableText(df_str), disp_attr),
-             _pack(cols)))
+        col_strs = cached_col_strs[col]
+
+        # not-focused rows at top
+        max_col_width = len(col_strs[0])
+        before_foc_str = col_strs[0] + '\n' # this is the header
+        if top_row < focus_row:
+            before_foc_str += '\n' + '\n'.join(col_strs[top_row:focus_row])
+        # focused row
+        focus_row_str = col_strs[focus_row]
+        max_col_width = max(max_col_width, len(focus_row_str))
+        # after focused rows at bottom
+        after_foc_str = '\n'.join(col_strs[focus_row + 1: bot_row])
+
+        # three layer version
+        pile = urwid.Pile([])
+        pile.contents.append((urwid.AttrMap(SelectableText(before_foc_str), disp_attr), ('pack', None)))
+        pile.contents.append((urwid.AttrMap(SelectableText(focus_row_str), 'active_row'), ('pack', None)))
+        pile.contents.append((urwid.AttrMap(SelectableText(after_foc_str), disp_attr), ('pack', None)))
+        pile.focus_position = 1
+        cols.contents.append((pile, _given(cols, len(focus_row_str))))
+
+        # one layer version - no active row
+        # cols.contents.append(
+        #     (urwid.AttrMap(SelectableText(before_foc_str + focus_row_str + after_foc_str),
+        #                                   disp_attr),
+        #                    _pack(cols)))
+
     try:
-        cols.focus_position = fp
+        cols.focus_position = focus_col
     except Exception as e:
         hint(str(e))
     end('df col')
@@ -124,14 +151,12 @@ class Minibuffer(urwid.WidgetWrap):
             return self.text.keypress(size, key)
 
 class SelectableText(urwid.Text):
-    def __init__(self, markup, align='left', wrap='space', layout=None):
+    def __init__(self, markup, align='left', wrap='clip', layout=None):
         super(self.__class__, self).__init__(markup, align, wrap, layout)
     def selectable(self):
         return True # this allows us to assign focus to the columns of text
     # def keypress(self, size, key):
     #     return None
-    def rows(self, size, focus=False):
-        return 70
 
 
 def add_column(columns, col_name, index):
@@ -165,6 +190,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         # self.col_viewer = col_viewer
         self.cols = urwid.Columns([], dividechars=1)
         self.top_row = 0
+        self.focus_row = 0
         urwid.WidgetWrap.__init__(self, self.cols)
         self.cached_col_str_lists = dict()
         for col in self.browser.dcols:
@@ -174,18 +200,22 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         # ignore passed browser
         if browser is None:
             browser = self.browser
-
-        disp_df_in_cols(browser.df, browser.dcols, self.cached_col_str_lists, self.top_row, cols=self.cols)
+        disp_df_in_cols(self.cols, browser.df, browser.dcols,
+                        self.cached_col_str_lists, self.top_row, self.focus_row)
 
     def scroll_down(self, num_rows=1):
-        self.top_row += num_rows
-        if self.top_row > len(self.browser.df):
-            self.top_row = len(self.browser.df) - 1 # todo this should take into account the height of the widget
+        self.focus_row += num_rows
+        if self.focus_row >= len(self.browser.df):
+            self.focus_row = len(self.browser.df) - 1 # todo this should take into account the height of the widget
+        while self.focus_row > self.top_row + 25: # TODO this is arbitrary
+            self.top_row += 1
         self.update_view()
     def scroll_up(self, num_rows=1):
-        self.top_row -= num_rows
-        if self.top_row < 0:
-            self.top_row = 0
+        self.focus_row -= num_rows
+        if self.focus_row < 0:
+            self.focus_row = 0
+        while self.focus_row < self.top_row + 10:
+            self.top_row -= 1
         self.update_view()
 
     def set_focus(self, num):
@@ -259,6 +289,7 @@ palette = [
     ('def', 'white', 'black'),
     ('help', 'black', 'light gray'),
     ('moving', 'light red', 'black'),
+    ('active_row', 'dark red', 'black'),
     ]
 
 # the DFBrowser basically maintains an undo history
@@ -390,6 +421,7 @@ def read_all_dfs_from_dir(directory):
     return df_merger
 
 def start_browser(df_c, df_name='dubois_mathlete_identities'):
+    st()
     urwid_browser = UrwidDFBrowser(df_c)
     urwid_browser.browser.merge_df(df_c[df_name])
     urwid_browser.start()
