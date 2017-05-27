@@ -9,7 +9,7 @@ def weeks_ago(n):
     return days_ago(7 * int(n))
 
 def days_ago(n):
-   return dt.datetime.combine(dt.date.today() - dt.timedelta(int(n)), dt.time.min) 
+   return dt.datetime.combine(dt.date.today() - dt.timedelta(int(n)), dt.time.min)
 
 def hours_ago(n):
    return dt.datetime.now() - dt.timedelta(0, int(n) * 60 * 60)
@@ -35,7 +35,7 @@ def ask_for_date():
     while True:
         ranges_completer = Completer(rangefuncs.keys())
         readline.set_completer(ranges_completer.complete)
-        rgnf = raw_input('DATE >>> ')
+        rgnf = input('DATE >>> ')
         all_args = rgnf.split(' ')
 
         func_args = list()
@@ -61,4 +61,3 @@ def ask_for_date():
         # except Exception as e:
         #     print(e)
         #     print('Sorry, that input is invalid. Try again (TAB to see valid options), or Ctrl-C to quit.')
-

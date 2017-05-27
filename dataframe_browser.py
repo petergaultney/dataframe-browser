@@ -28,7 +28,7 @@ def get_fkey_for_dfid(smart_df, target_df_id):
     return fkeys(smart_df)[target_df_id]
 def get_fkey(smart_df, target_df):
     return get_fkey_for_dfid(smart_df, id(target_df))
-    
+
 def add_fkey_for_dfid(smart_df, target_df_id, fkey):
     fkeys(smart_df)[target_df_id] = fkey
 def add_fkey(smart_df, target_df, fkey): # gets id and passes along
@@ -38,13 +38,14 @@ def sf_has_target(smart_df, target_df):
     if id(target_df) in fkeys(smart_df):
         return True
     return False
-    
+
 class DataFrameSmartMerger(object):
     def __init__(self):
         self._smart_frames = dict()
         self._names_of_dfs_known_to_be_smart = dict()
         self._smart_frames_which_have_a_foreign_key_for_this_dfid = dict()
     def add(self, df, name, suffix=None):
+        print('adding dataframe ' + name)
         if not suffix:
             suffix = name
         df_id = id(df)
@@ -130,7 +131,7 @@ class DataFrameSmartMerger(object):
             # the columns have been renamed. If they have been renamed,
             # we could add a new foreign key record to all SmartFrames
             # with the new merged name. But for now we'll leave this as-is.
-            
+
             # print("WARNING - this smart frame {} has already been added for df {}".format(
             #     self._get_best_printable_name(smart_frame), df_name))
             pass
@@ -155,7 +156,7 @@ class DataFrameSmartMerger(object):
         #       + self._get_best_printable_name(df_id) + '\'s primary key')
         add_fkey_for_dfid(smart_frame, df_id, foreign_key)
         self._add_reverse_smart_merge(df_id, smart_frame)
-        
+
     def get_known_names(self):
         return self._smart_frames.keys()
     def get_known_name(self, df):
@@ -174,8 +175,8 @@ class DataFrameSmartMerger(object):
 
         # when we get to a merge, we assume unless told otherwise that
         # the caller wants df columns with matching names to be suffixed
-        # only in the names of df2. 
-        if preferred_df_to_suffix is None or (id(preferred_df_to_suffix) != id(df1) and 
+        # only in the names of df2.
+        if preferred_df_to_suffix is None or (id(preferred_df_to_suffix) != id(df1) and
                                               id(preferred_df_to_suffix) != id(df2)):
             preferred_df_to_suffix = df2
 
@@ -226,7 +227,7 @@ class DataFrameSmartMerger(object):
         # get shortcut names for easier printing
         df_w_primkey_name = self._get_best_printable_name(df_w_primkey)
         df_w_fkey_name = self._get_best_printable_name(smart_frame_w_fkey)
-            
+
         #
         # past here, we should not refer to anything except in terms of w_primkey and w_fkey
         #
@@ -240,7 +241,7 @@ class DataFrameSmartMerger(object):
         # and maybe also check to see if this already has the one,
         # because if it does we should eliminate the duplicate column.
         # but is it really a duplicate? maybe not...
-        
+
         # now that we KNOW which direction to merge and how, so DO MERGE!
         foreign_key = get_fkey(smart_frame_w_fkey, df_w_primkey)
         # print('### merging {} with {}\'s primary key using fkey {}'.format(
@@ -309,7 +310,5 @@ class DataFrameSmartMerger(object):
                 self._register_smart_merge(smart_frame,
                                            the_fkey,
                                            merged_id)
-        
+
         return merged
-
-
