@@ -326,18 +326,19 @@ def add_column(columns, col_name, index):
         new_cols.insert(index, col_name)
     return new_cols
 
-def remove_column(columns, col_name):
-    if col_name not in columns:
-        return columns
-    else:
-        return remove_column_by_index(columns, columns.index(col_name))
+def find_and_remove_list_item(lst, item):
+    try:
+        return remove_list_index(lst, lst.index(item))
+    except:
+        return lst
 
-def remove_column_by_index(columns, index):
-    if index < len(columns) and index >= 0:
-        new_cols = columns[:]
-        del new_cols[index]
-        return new_cols
-    return columns
+def remove_list_index(lst, index):
+    try:
+        new_lst = lst[:]
+        del new_lst[index]
+        return new_lst
+    except:
+        return lst
 
 def shift_list_item(lst, idx, to_right):
     if idx < len(lst) and idx >= 0:
@@ -398,11 +399,11 @@ class DFBrowser(object):
                 pass
         return False
 
-    def shift_col(self, col_idx, num_cols_to_right):
+    def shift_column(self, col_idx, num_cols_to_right):
         new_dcols = shift_list_item(self.display_cols, col_idx, num_cols_to_right)
-        return self._new_display_cols_change(self.display_cols, new_dcols)
+        return self._change_display_cols(self.display_cols, new_dcols)
 
-    def _new_display_cols_change(self, old_cols, new_cols):
+    def _change_display_cols(self, old_cols, new_cols):
         if old_cols != new_cols:
             self.display_cols_hist.append(old_cols)
             self.undo_hist.append(self.display_cols_hist)
@@ -414,15 +415,16 @@ class DFBrowser(object):
     def add_col(self, col_name, index):
         if col_name in list(self.df):
             new_dcols = add_column(self.display_cols, col_name, index)
-            return self._new_display_cols_change(self.display_cols, new_dcols)
+            return self._change_display_cols(self.display_cols, new_dcols)
         return False
 
     def hide_col_by_name(self, col_name):
-        return self.hide_column_by_index(self.display_cols, self.display_cols.index(col_name))
+        new_cols = find_and_remove_list_item(self.display_cols, col_name)
+        return self._change_display_cols(self.display_cols, new_dcols)
 
     def hide_col_by_index(self, index):
-        new_cols = hide_column_by_index(self.display_cols, index)
-        return self._new_display_cols_change(self.display_cols, new_cols)
+        new_cols = remove_list_index(self.display_cols, index)
+        return self._change_display_cols(self.display_cols, new_cols)
 
     def undo(self, n=1):
         while n > 0 and len(self.undo_hist) > 0:

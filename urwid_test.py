@@ -118,8 +118,12 @@ class HelpText(urwid.WidgetWrap):
         urwid.WidgetWrap.__init__(self, self.text)
     def set_text(self, text):
         self.text.set_text(text)
+    def show_basic_commands(self):
+        self.set_text('(hjkl) move focus; (h)ide; (u)ndo; (m)erge; (+-) adjust col size; (,.) shift col; / enter command mode')
+    def show_command_options(self):
+        self.set_text('type column name to add, then press enter. Press Esc to return to browsing.')
     def keypress(self, size, key):
-        raise urwid.ExitMainLoop('focus on help text!')
+        raise urwid.ExitMainLoop('somehow put focus on help text!')
 
 class Minibuffer(urwid.WidgetWrap):
     def __init__(self, urwid_browser):
@@ -232,7 +236,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         return self.df_browser.add_col(col_name, idx)
 
     def hide_current_col(self):
-        return self.df_browser.remove_col_by_index(self.urwid_cols.focus_position)
+        return self.df_browser.hide_col_by_index(self.urwid_cols.focus_position)
 
     def keypress(self, size, key):
         if key in '1234567890':
@@ -267,12 +271,12 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             self.scroll_down(PAGE_SIZE)
         elif key == '/':
             self.urwid_browser.focus_minibuffer()
-        elif key == ',':
-            if self.df_browser.shift_col(self.urwid_cols.focus_position, -1):
+        elif key == ',' or key == '>':
+            if self.df_browser.shift_column(self.urwid_cols.focus_position, -1):
                 self.urwid_cols.focus_position -= 1
                 self.update_view() # TODO this incurs a double update penalty
-        elif key == '.':
-            if self.df_browser.shift_col(self.urwid_cols.focus_position, 1):
+        elif key == '.' or key == '<':
+            if self.df_browser.shift_column(self.urwid_cols.focus_position, 1):
                 self.urwid_cols.focus_position += 1
                 self.update_view()
         else:
@@ -300,6 +304,7 @@ class UrwidDFBrowser:
     def __init__(self, smart_merger=None):
         self.df_browser = dataframe_browser.DFBrowser(smart_merger)
         self.helper = HelpText()
+        self.helper.show_basic_commands()
         self.minibuffer = Minibuffer(self)
         self.colview = UrwidDFColumnView(self, self.df_browser)
         self.df_browser.add_change_callback(self.colview.update_view)
@@ -313,9 +318,11 @@ class UrwidDFBrowser:
     def focus_minibuffer(self):
         self.frame.focus_position = 'footer'
         self.minibuffer.focus_granted()
+        self.helper.show_command_options()
     def focus_browser(self):
         self.frame.focus_position = 'body'
         self.minibuffer.focus_removed()
+        self.helper.show_basic_commands()
     def keypress(self, size, key):
         raise urwid.ExitMainLoop('keypress in DFbrowser!')
     # def input(self, inpt, raw):
