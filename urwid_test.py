@@ -27,6 +27,8 @@ def end(name):
     print('{:20} {:10.2f} ms'.format(name, elapsed_time * 1000))
 #end debug stuff
 
+PAGE_SIZE = 20
+
 # this stuff captures Ctrl-C
 # ui = urwid.raw_display.RealTerminal()
 # ui.tty_signal_keys('undefined', 'undefined', 'undefined', 'undefined',
@@ -50,7 +52,7 @@ def _given(columns, nc):
 
 # displays a dataframe either in the provided cols object, replacing the contents,
 # or in a new object, if no cols object provided
-def disp_df_in_cols(cols, df, dcols, cached_col_strs, top_row, focus_row):
+def disp_df_in_cols(cols, df, display_cols, cached_col_strs, top_row, focus_row):
     end('kp to kp')
     st()
     st()
@@ -63,7 +65,7 @@ def disp_df_in_cols(cols, df, dcols, cached_col_strs, top_row, focus_row):
 
     top_row += 1 # hack to display column name
     focus_row += 1
-    for idx, col in enumerate(dcols):
+    for idx, col in enumerate(display_cols):
         disp_attr = 'def'
         if idx == focus_col:
             disp_attr = 'active_col'
@@ -116,39 +118,45 @@ class HelpText(urwid.WidgetWrap):
         raise urwid.ExitMainLoop('focus on help text!')
 
 class Minibuffer(urwid.WidgetWrap):
-    def __init__(self, browser):
-        self.browser = browser
-        self.text = urwid_utils.AdvancedEdit(caption='browsing...', multiline=False)
-        urwid.WidgetWrap.__init__(self, self.text)
+    def __init__(self, urwid_browser):
+        self.urwid_browser = urwid_browser
+        self.edit_text = urwid_utils.AdvancedEdit(caption='browsing... ', multiline=False)
+        urwid.WidgetWrap.__init__(self, self.edit_text)
     def add(self, completion_cb=None):
         if completion_cb is not None:
-            self.text.setCompletionMethod(completion_cb)
-        self.text.set_caption('add column: ')
-        self.browser.frame.focus_position = 'footer'
+            self.edit_text.setCompletionMethod(completion_cb)
+        self.edit_text.set_caption('add column: ')
+        self.urwid_browser.frame.focus_position = 'footer'
         self.enter_cb = None
-    def _get_focus(self):
-        self.browser.frame.focus_position = 'footer'
+    def focus_granted(self):
+        self.edit_text.set_caption('add: ')
+    def focus_removed(self):
+        self.edit_text.set_caption('browsing... ')
+    def give_away_focus(self):
+        self.urwid_browser.focus_browser()
     def merge(self, completion_cb=None):
-        self.text.setCompletionMethod(completion_cb)
-        self.text.set_caption('merge with: ')
-        self.browser.frame.focus_position = 'footer'
+        # TODO this looks bad
+        self.edit_text.setCompletionMethod(completion_cb)
+        self.edit_text.set_caption('merge with: ')
+        self.urwid_browser.frame.focus_position = 'footer'
     def keypress(self, size, key):
         if key == 'enter':
-            name = self.text.get_edit_text()
-            if self.browser.colview.add_col(name):
+            name = self.edit_text.get_edit_text()
+            print(name)
+            if self.urwid_browser.colview.add_col(name):
                 # we accept this input
-                self.text.set_edit_text('')
-                self.browser.frame.focus_position = 'body'
+                self.edit_text.set_edit_text('')
+                self.urwid_browser.frame.focus_position = 'body'
             else:
-                self.browser.helper.set_text(str(name) + ' not in df')
+                self.urwid_browser.helper.set_text(str(name) + ' not in df')
                 # self.browser.helper.set_text(str(list(self.browser.colview.df)))
         elif key == 'esc':
-            self.text.set_caption('browsing...')
-            self.browser.frame.focus_position = 'body'
+            self.give_away_focus()
         elif key == 'ctrl c':
-            raise urwid.ExitMainLoop()
+            # raise urwid.ExitMainLoop()
+            self.give_away_focus()
         else:
-            return self.text.keypress(size, key)
+            return self.edit_text.keypress(size, key)
 
 class SelectableText(urwid.Text):
     def __init__(self, markup, align='left', wrap='clip', layout=None):
@@ -159,54 +167,29 @@ class SelectableText(urwid.Text):
     #     return None
 
 
-def add_column(columns, col_name, index):
-    if col_name in columns and columns[index] == col_name:
-        return columns # done. no new list, b/c no change happened.
-
-    new_cols = columns[:] # make new list, b/c we're making a change
-    if col_name in columns:
-        cur_idx = columns.index(col_name)
-        new_cols.insert(index, columns.pop(cur_idx))
-    else:
-        new_cols.insert(index, col_name)
-    return new_cols
-
-def remove_column(columns, col_name):
-    if col_name not in columns:
-        return columns
-    else:
-        return remove_column_by_index(columns, columns.index(col_name))
-
-def remove_column_by_index(columns, index):
-    if index < len(columns) and index >= 0:
-        new_cols = columns[:]
-        del new_cols[index]
-        return new_cols
-    return columns
-
 class UrwidDFColumnView(urwid.WidgetWrap):
-    def __init__(self, browser):
-        self.browser = browser
+    def __init__(self, urwid_browser, df_browser):
+        self.urwid_browser = urwid_browser
+        self.df_browser = df_browser
         # self.col_viewer = col_viewer
-        self.cols = urwid.Columns([], dividechars=1)
+        self.urwid_cols = urwid.Columns([], dividechars=1)
         self.top_row = 0
         self.focus_row = 0
-        urwid.WidgetWrap.__init__(self, self.cols)
+        urwid.WidgetWrap.__init__(self, self.urwid_cols)
         self.cached_col_str_lists = dict()
-        for col in self.browser.dcols:
-            self.cached_col_str_lists[col] = generate_strs_for_col(browser.df, col)
+        for col in self.df_browser.display_cols:
+            self.cached_col_str_lists[col] = generate_strs_for_col(self.df_browser.df, col)
 
     def update_view(self, browser=None):
-        # ignore passed browser
-        if browser is None:
-            browser = self.browser
-        disp_df_in_cols(self.cols, browser.df, browser.dcols,
+        if not browser:
+            browser = self.df_browser
+        disp_df_in_cols(self.urwid_cols, browser.df, browser.display_cols,
                         self.cached_col_str_lists, self.top_row, self.focus_row)
 
     def scroll_down(self, num_rows=1):
         self.focus_row += num_rows
-        if self.focus_row >= len(self.browser.df):
-            self.focus_row = len(self.browser.df) - 1 # todo this should take into account the height of the widget
+        if self.focus_row >= len(self.df_browser.df):
+            self.focus_row = len(self.df_browser.df) - 1 # todo this should take into account the height of the widget
         while self.focus_row > self.top_row + 25: # TODO this is arbitrary
             self.top_row += 1
         self.update_view()
@@ -221,45 +204,49 @@ class UrwidDFColumnView(urwid.WidgetWrap):
     def set_focus(self, num):
         if num < 0:
             num = 0
-        if num >= len(self.cols.contents):
-            num = len(self.cols.contents) - 1
+        if num >= len(self.urwid_cols.contents):
+            num = len(self.urwid_cols.contents) - 1
         try:
-            self.cols.focus_position = num
+            self.urwid_cols.focus_position = num
             self.update_view()
             return True
         except:
             hint('failed to set focus to '+ str(num + 1))
             return False
 
+    def undo(self):
+        self.df_browser.undo()
+
     def add_col(self, col_name, idx=None):
         try:
-            if not idx or idx < 0 or idx > self.cols.focus_position:
-                idx = self.cols.focus_position
+            if not idx or idx < 0 or idx > self.urwid_cols.focus_position:
+                idx = self.urwid_cols.focus_position
         except: # if for some reason cols.focus_position doesn't exist at all...
             idx = 0
-        return self.browser.add_col(col_name, idx)
+        return self.df_browser.add_col(col_name, idx)
 
     def remove_col(self):
-        return self.browser.remove_col_by_index(self.cols.focus_position)
+        return self.df_browser.remove_col_by_index(self.urwid_cols.focus_position)
 
     def keypress(self, size, key):
         if key in '1234567890':
+            # directly select the column #
             num = int(key) - 1
             if num == -1:
                 num = 9
             self.set_focus(num)
         elif key == 'm':
-            urwid_browser.mini.merge(urwid_utils.ListCompleter(list(self.browser.smerge)))
+            urwid_browser.minibuffer.merge(urwid_utils.ListCompleter(list(self.df_browser.smerge)))
         elif key == 'r':
             self.remove_col()
         elif key == 's':
             pass
         elif key == 'a':
-            urwid_browser.mini.add(urwid_utils.ListCompleter(list(self.df), hint).complete)
+            urwid_browser.minibuffer.add(urwid_utils.ListCompleter(list(self.df_browser.df), hint).complete)
         elif key == 'right' or key=='l':
-            self.set_focus(self.cols.focus_position + 1)
+            self.set_focus(self.urwid_cols.focus_position + 1)
         elif key == 'left' or key == 'h':
-            self.set_focus(self.cols.focus_position - 1)
+            self.set_focus(self.urwid_cols.focus_position - 1)
         elif key == 'down' or key == 'j':
             self.scroll_down()
         elif key == 'up' or key == 'k':
@@ -269,9 +256,19 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         elif key == 'q':
             raise urwid.ExitMainLoop()
         elif key == 'page up':
-            self.scroll_up(20)
+            self.scroll_up(PAGE_SIZE)
         elif key == 'page down':
-            self.scroll_down(20)
+            self.scroll_down(PAGE_SIZE)
+        elif key == '/':
+            self.urwid_browser.focus_minibuffer()
+        elif key == ',':
+            if self.df_browser.move_col(self.urwid_cols.focus_position, -1):
+                self.urwid_cols.focus_position -= 1
+                self.update_view()
+        elif key == '.':
+            if self.df_browser.move_col(self.urwid_cols.focus_position, 1):
+                self.urwid_cols.focus_position += 1
+                self.update_view()
         else:
             hint('CV: ' + key)
             return None
@@ -292,108 +289,27 @@ palette = [
     ('active_row', 'dark red', 'black'),
     ]
 
-# the DFBrowser basically maintains an undo history
-# and helps provide a basic API for how a dataframe can be viewed.
-class DFBrowser(object):
-    def __init__(self, smart_merger=None):
-        self.df = None
-        self.dcols = list()
-        self.df_hist = list()
-        self.dcols_hist = list()
-        self.undo_hist = list()
-        self.smerge = smart_merger
-        self.change_cbs = list()
-
-    def _msg_cbs(self):
-        for cb in self.change_cbs:
-            cb(self)
-
-    def sort_cols(self, columns):
-        pass
-
-    def merge_df(self, new_df):
-        if self.df is None:
-            print('adding new df!')
-            self.df = new_df
-            self.dcols = list(new_df)
-            self._msg_cbs()
-            return True
-
-        # assume i already have columns. then get the difference between
-        # my currently displays columns and the columns that this dataframe will add.
-        # if columns are going to change names, it should preferably be
-        # only the new columns that get new names. This allows me to ignore
-        # any name conflicts.
-        # do merge
-        if self.smerge is not None:
-            try:
-                merged_df = self.smerge(self.df, new_df)
-                self.df_hist.append(self.df)
-                self.undo_hist.append(self.df_hist)
-                self.df = merged_df
-                self._msg_cbs()
-                return True
-            except:
-                pass
-        return False
-
-    def add_col(self, col_name, index):
-        if col_name in list(self.df):
-            new_cols = add_column(self.dcols, col_name, index)
-            if new_cols is not self.dcols:
-                self.dcols_hist.append(self.dcols)
-                self.undo_hist.append(self.dcols_hist)
-                self.dcols = new_cols
-                self._msg_cbs()
-                return True
-        return False
-
-    def remove_col(self, col_name):
-        new_cols = remove_column(self.dcols, col_name)
-        return self._after_remove_col(new_cols)
-
-    def remove_col_by_index(self, index):
-        new_cols = remove_column_by_index(self.dcols, index)
-        return self._after_remove_col(new_cols)
-
-    def _after_remove_col(self, new_cols):
-        if new_cols is not self.dcols:
-            self.dcols_hist.append(self.dcols) # shallow copy
-            self.dcols = new_cols
-            self._msg_cbs()
-            return True
-        return False
-
-    def undo(self, n=1):
-        while n > 0 and len(self.undo_hist) > 0:
-            change_type = self.undo_hist.pop()
-            if change_type == self.df_hist:
-                self.df = self.df_hist.pop()
-            elif change_type == self.dcol_hist:
-                self.dcols = self.dcol_hist.pop()
-            else:
-                break
-        self._msg_cbs()
-
-    def add_change_callback(self, cb):
-        if cb not in self.change_cbs:
-            self.change_cbs.append(cb)
 
 class UrwidDFBrowser:
     def __init__(self, smart_merger=None):
-        self.browser = DFBrowser(smart_merger)
+        self.df_browser = dataframe_browser.DFBrowser(smart_merger)
         self.helper = HelpText()
-        self.mini = Minibuffer(self)
-        self.colview = UrwidDFColumnView(self.browser)
-        self.browser.add_change_callback(self.colview.update_view)
+        self.minibuffer = Minibuffer(self)
+        self.colview = UrwidDFColumnView(self, self.df_browser)
+        self.df_browser.add_change_callback(self.colview.update_view)
         self.inner_frame = urwid.Frame(urwid.Filler(self.colview, valign='top'),
                                        footer=urwid.AttrMap(self.helper, 'help'))
-        self.frame = urwid.Frame(self.inner_frame, footer=self.mini)
+        self.frame = urwid.Frame(self.inner_frame, footer=self.minibuffer)
     def start(self):
         self.loop = urwid.MainLoop(self.frame, palette, # input_filter=self.input,
                                    unhandled_input=self.unhandled_input)
         self.loop.run()
-
+    def focus_minibuffer(self):
+        self.frame.focus_position = 'footer'
+        self.minibuffer.focus_granted()
+    def focus_browser(self):
+        self.frame.focus_position = 'body'
+        self.minibuffer.focus_removed()
     def keypress(self, size, key):
         raise urwid.ExitMainLoop('keypress in DFbrowser!')
     # def input(self, inpt, raw):
@@ -423,7 +339,7 @@ def read_all_dfs_from_dir(directory):
 def start_browser(df_c, df_name='dubois_mathlete_identities'):
     st()
     urwid_browser = UrwidDFBrowser(df_c)
-    urwid_browser.browser.merge_df(df_c[df_name])
+    urwid_browser.df_browser.merge_df(df_c[df_name])
     urwid_browser.start()
 
 if __name__ == '__main__':

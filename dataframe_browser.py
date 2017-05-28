@@ -312,3 +312,136 @@ class DataFrameSmartMerger(object):
                                            merged_id)
 
         return merged
+
+
+def add_column(columns, col_name, index):
+    if col_name in columns and columns[index] == col_name:
+        return columns # done. no new list, b/c no change happened.
+
+    new_cols = columns[:] # make new list, b/c we're making a change
+    if col_name in columns:
+        cur_idx = columns.index(col_name)
+        new_cols.insert(index, columns.pop(cur_idx))
+    else:
+        new_cols.insert(index, col_name)
+    return new_cols
+
+def remove_column(columns, col_name):
+    if col_name not in columns:
+        return columns
+    else:
+        return remove_column_by_index(columns, columns.index(col_name))
+
+def remove_column_by_index(columns, index):
+    if index < len(columns) and index >= 0:
+        new_cols = columns[:]
+        del new_cols[index]
+        return new_cols
+    return columns
+
+def shift_list_item(lst, idx, to_right):
+    if idx < len(lst) and idx >= 0:
+        new_idx = idx + to_right
+        if new_idx < len(lst) and new_idx >= 0 and idx != new_idx:
+            item = lst[idx]
+            new_lst = lst[:]
+            del new_lst[idx]
+            new_lst.insert(new_idx, item)
+            return new_lst
+    return lst # no change
+
+# the DFBrowser basically maintains an undo history
+# and helps provide a basic API for how a dataframe can be viewed.
+class DFBrowser(object):
+    def __init__(self, smart_merger=None):
+        self.df = None
+        self.display_cols = list()
+        self.df_hist = list()
+        self.display_cols_hist = list()
+        self.undo_hist = list()
+        self.smerge = smart_merger
+        self.change_cbs = list()
+
+    def _msg_cbs(self):
+        for cb in self.change_cbs:
+            cb(self)
+
+    def sort_cols(self, columns):
+        pass
+
+    def merge_df(self, new_df):
+        if self.df is None:
+            print('adding new df!')
+            self.df = new_df
+            self.display_cols = list(new_df)
+            self._msg_cbs()
+            return True
+
+        # assume i already have columns. then get the difference between
+        # my currently displays columns and the columns that this dataframe will add.
+        # if columns are going to change names, it should preferably be
+        # only the new columns that get new names. This allows me to ignore
+        # any name conflicts.
+        # do merge
+        if self.smerge is not None:
+            try:
+                merged_df = self.smerge(self.df, new_df)
+                self.df_hist.append(self.df)
+                self.undo_hist.append(self.df_hist)
+                self.df = merged_df
+                self._msg_cbs()
+                return True
+            except:
+                pass
+        return False
+
+    def move_col(self, col_idx, num_cols_to_right):
+        new_dcols = shift_list_item(self.display_cols, col_idx, num_cols_to_right)
+        if self.display_cols != new_dcols:
+            # things changed. add to undo history
+            self._new_display_cols_undo(self.display_cols, new_dcols)
+            return True
+        return False
+
+    def _new_display_cols_undo(self, old_cols, new_cols):
+        self.display_cols_hist.append(old_cols)
+        self.undo_hist.append(self.display_cols_hist)
+        self.display_cols = new_cols
+        self._msg_cbs()
+
+    def add_col(self, col_name, index):
+        if col_name in list(self.df):
+            new_dcols = add_column(self.display_cols, col_name, index)
+            if new_dcols is not self.display_cols:
+                self._new_display_cols_undo(self.display_cols, new_dcols)
+                return True
+        return False
+
+    def remove_col(self, col_name):
+        return self.remove_column_by_index(self.display_cols, self.display_cols.index(col_name))
+
+    def remove_col_by_index(self, index):
+        new_cols = remove_column_by_index(self.display_cols, index)
+        return self._after_remove_col(new_cols)
+
+    def _after_remove_col(self, new_dcols):
+        if new_dcols is not self.display_cols:
+            self._new_display_cols_undo(self.display_cols, new_dcols)
+            return True
+        return False
+
+    def undo(self, n=1):
+        while n > 0 and len(self.undo_hist) > 0:
+            change_type = self.undo_hist.pop()
+            if change_type == self.df_hist:
+                self.df = self.df_hist.pop()
+            elif change_type == self.display_cols_hist:
+                self.display_cols = self.display_cols_hist.pop()
+            else:
+                break
+            n -= 1
+        self._msg_cbs()
+
+    def add_change_callback(self, cb):
+        if cb not in self.change_cbs:
+            self.change_cbs.append(cb)

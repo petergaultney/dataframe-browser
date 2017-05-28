@@ -1,6 +1,8 @@
 import urwid
 import sys
 
+
+# It appears that I found this here: https://wiki.goffi.org/wiki/Urwid-satext/en
 class AdvancedEdit(urwid.Edit):
     """Edit box with some custom improvments
     new chars:
@@ -9,7 +11,7 @@ class AdvancedEdit(urwid.Edit):
               - C-k: remove everything on the right of the cursor
               - C-w: remove the word on the back
     """
-  
+
     def setCompletionMethod(self, callback):
         """Define method called when completion is asked
         @callback: method with 2 arguments:
@@ -22,7 +24,7 @@ class AdvancedEdit(urwid.Edit):
                    and which return the full text completed"""
         self.completion_cb = callback
         self.completion_data = {}
-  
+
     def keypress(self, size, key):
         if key == 'ctrl a':
             key = 'home'
