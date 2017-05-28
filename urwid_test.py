@@ -77,7 +77,11 @@ def disp_df_in_cols(cols, df, display_cols, cached_col_strs, top_row, focus_row)
 
         # not-focused rows at top
         max_col_width = len(col_strs[0])
-        before_foc_str = col_strs[0] + '\n' # this is the header
+        before_foc_str = col_strs[0] # header
+        if top_row > 1 and idx == focus_col:
+            before_foc_str += '\n' + ' ' * (max_col_width - 3) + '...'
+        else:
+            before_foc_str += '\n'
         if top_row < focus_row:
             before_foc_str += '\n' + '\n'.join(col_strs[top_row:focus_row])
         # focused row
@@ -183,6 +187,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
     def update_view(self, browser=None):
         if not browser:
             browser = self.df_browser
+        print(str(self.top_row) + ' ' + str(self.focus_row))
         disp_df_in_cols(self.urwid_cols, browser.df, browser.display_cols,
                         self.cached_col_str_lists, self.top_row, self.focus_row)
 
@@ -193,11 +198,12 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         while self.focus_row > self.top_row + 25: # TODO this is arbitrary
             self.top_row += 1
         self.update_view()
+
     def scroll_up(self, num_rows=1):
         self.focus_row -= num_rows
         if self.focus_row < 0:
             self.focus_row = 0
-        while self.focus_row < self.top_row + 10:
+        while self.focus_row < self.top_row + 10 and self.top_row > 0: # TODO this is arbitrary
             self.top_row -= 1
         self.update_view()
 
@@ -225,7 +231,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             idx = 0
         return self.df_browser.add_col(col_name, idx)
 
-    def remove_col(self):
+    def hide_current_col(self):
         return self.df_browser.remove_col_by_index(self.urwid_cols.focus_position)
 
     def keypress(self, size, key):
@@ -237,8 +243,8 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             self.set_focus(num)
         elif key == 'm':
             urwid_browser.minibuffer.merge(urwid_utils.ListCompleter(list(self.df_browser.smerge)))
-        elif key == 'r':
-            self.remove_col()
+        elif key == 'h':
+            self.hide_current_col()
         elif key == 's':
             pass
         elif key == 'a':
@@ -262,11 +268,11 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         elif key == '/':
             self.urwid_browser.focus_minibuffer()
         elif key == ',':
-            if self.df_browser.move_col(self.urwid_cols.focus_position, -1):
+            if self.df_browser.shift_col(self.urwid_cols.focus_position, -1):
                 self.urwid_cols.focus_position -= 1
-                self.update_view()
+                self.update_view() # TODO this incurs a double update penalty
         elif key == '.':
-            if self.df_browser.move_col(self.urwid_cols.focus_position, 1):
+            if self.df_browser.shift_col(self.urwid_cols.focus_position, 1):
                 self.urwid_cols.focus_position += 1
                 self.update_view()
         else:

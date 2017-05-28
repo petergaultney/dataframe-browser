@@ -362,6 +362,9 @@ class DFBrowser(object):
         self.smerge = smart_merger
         self.change_cbs = list()
 
+    def __len__(self):
+        return len(self.df)
+
     def _msg_cbs(self):
         for cb in self.change_cbs:
             cb(self)
@@ -395,40 +398,31 @@ class DFBrowser(object):
                 pass
         return False
 
-    def move_col(self, col_idx, num_cols_to_right):
+    def shift_col(self, col_idx, num_cols_to_right):
         new_dcols = shift_list_item(self.display_cols, col_idx, num_cols_to_right)
-        if self.display_cols != new_dcols:
-            # things changed. add to undo history
-            self._new_display_cols_undo(self.display_cols, new_dcols)
+        return self._new_display_cols_change(self.display_cols, new_dcols)
+
+    def _new_display_cols_change(self, old_cols, new_cols):
+        if old_cols != new_cols:
+            self.display_cols_hist.append(old_cols)
+            self.undo_hist.append(self.display_cols_hist)
+            self.display_cols = new_cols
+            self._msg_cbs()
             return True
         return False
-
-    def _new_display_cols_undo(self, old_cols, new_cols):
-        self.display_cols_hist.append(old_cols)
-        self.undo_hist.append(self.display_cols_hist)
-        self.display_cols = new_cols
-        self._msg_cbs()
 
     def add_col(self, col_name, index):
         if col_name in list(self.df):
             new_dcols = add_column(self.display_cols, col_name, index)
-            if new_dcols is not self.display_cols:
-                self._new_display_cols_undo(self.display_cols, new_dcols)
-                return True
+            return self._new_display_cols_change(self.display_cols, new_dcols)
         return False
 
-    def remove_col(self, col_name):
-        return self.remove_column_by_index(self.display_cols, self.display_cols.index(col_name))
+    def hide_col_by_name(self, col_name):
+        return self.hide_column_by_index(self.display_cols, self.display_cols.index(col_name))
 
-    def remove_col_by_index(self, index):
-        new_cols = remove_column_by_index(self.display_cols, index)
-        return self._after_remove_col(new_cols)
-
-    def _after_remove_col(self, new_dcols):
-        if new_dcols is not self.display_cols:
-            self._new_display_cols_undo(self.display_cols, new_dcols)
-            return True
-        return False
+    def hide_col_by_index(self, index):
+        new_cols = hide_column_by_index(self.display_cols, index)
+        return self._new_display_cols_change(self.display_cols, new_cols)
 
     def undo(self, n=1):
         while n > 0 and len(self.undo_hist) > 0:
