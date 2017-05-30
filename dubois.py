@@ -47,7 +47,6 @@ _known_merges = [
     ]
 
 # connect to US-East region by default
-admin_creds = Creds('AKIAI6QL4UODPSNDXR6A', '6oFOMqFU40mJSuudY7Rgh4ykdjirfSCAq45kCNRo')
 def get_admin_conn():
     conn = boto.sdb.connect_to_region('us-east-1')
     return conn
