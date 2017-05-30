@@ -29,8 +29,8 @@ def generate_str_for_col(df, col_name, top_row=0, bot_row=None):
 
 def _pack(columns): # this just exists to cut down code bloat
     return columns.options(width_type='pack')
-def _given(columns, nc):
-    return columns.options('given', nc)
+def _given(columns, width):
+    return columns.options('given', width)
 
 def new_display_df_in_cols(urwid_cols, df_view):
     end('kp to kp') # DEBUG
@@ -74,23 +74,23 @@ def create_column_pile(urwid_cols, df_view, col_name, is_focus_col):
     col_disp_attr = 'def' if not is_focus_col else 'active_col'
     selected_row_attr = 'active_element' if is_focus_col else 'active_row'
     selected_row = df_view.selected_relative
-
     column_header = df_view.header(col_name)
     column_strings = df_view.lines(col_name)
+    align = df_view.justify(col_name)
     part_one = column_header
-    assert not part_one.endswith('\n')
     part_one += '\n...\n' if df_view.top_row > 1 and is_focus_col else '\n\n'
     part_one += '\n'.join(column_strings[0:selected_row])
     part_two =  '\n'.join(column_strings[selected_row + 1: len(column_strings)])
     return create_column_from_text_and_attrib(part_one, column_strings[selected_row], part_two,
-                                              col_disp_attr, selected_row_attr)
+                                              col_disp_attr, selected_row_attr, align)
 
 
-def create_column_from_text_and_attrib(part_one, selected_row_text, part_two, col_attrib, selected_row_attrib):
+def create_column_from_text_and_attrib(part_one, selected_row_text, part_two, col_attrib,
+                                       selected_row_attrib, align):
     pile = urwid.Pile([])
-    pile.contents.append((urwid.AttrMap(SelectableText(part_one), col_attrib), ('pack', None)))
-    pile.contents.append((urwid.AttrMap(SelectableText(selected_row_text), selected_row_attrib), ('pack', None)))
-    pile.contents.append((urwid.AttrMap(SelectableText(part_two), col_attrib), ('pack', None)))
+    pile.contents.append((urwid.AttrMap(SelectableText(part_one, align=align), col_attrib), ('pack', None)))
+    pile.contents.append((urwid.AttrMap(SelectableText(selected_row_text, align=align), selected_row_attrib), ('pack', None)))
+    pile.contents.append((urwid.AttrMap(SelectableText(part_two, align=align), col_attrib), ('pack', None)))
     pile.focus_position = 1
     return pile
 
@@ -155,8 +155,13 @@ class Minibuffer(urwid.WidgetWrap):
             return self.edit_text.keypress(size, key)
 
 class SelectableText(urwid.Text):
-    def __init__(self, markup, align='left', wrap='clip', layout=None):
-        super(self.__class__, self).__init__(markup, align, wrap, layout)
+    def __init__(self, text, align='right', wrap='clip', layout=None):
+        # txt = text.strip()
+        # try:
+        #     i = float(txt)
+        #     super(self.__class__, self).__init__(txt, 'right', wrap, layout)
+        # except:
+        super(self.__class__, self).__init__(text, align, wrap, layout)
     def selectable(self):
         return True # this allows us to assign focus to the columns of text
     # def keypress(self, size, key):
@@ -279,11 +284,28 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             if self.df_browser.shift_column(self.urwid_cols.focus_position, 1):
                 self.urwid_cols.focus_position += 1
                 self.update_view()
+        elif key == '=' or key == '+':
+            self.change_column_width(1)
+        elif key == '-':
+            self.change_column_width(-1)
         else:
             hint('CV: ' + key)
             return None
+    def change_column_width(self, by_n):
+        self.df_view.change_column_width(self.focus_col, by_n)
+        self.urwid_cols.contents[self.focus_pos] = (self.urwid_cols.contents[self.focus_pos][0],
+                                                    _given(self.urwid_cols, self.df_view.width(self.focus_col)))
+
     # def mouse_event(self, size, event, button, col, row, focus):
     #     return None
+    @property
+    def focus_col(self):
+        return self._col_by_index(self.focus_pos)
+    @property
+    def focus_pos(self):
+        return self.urwid_cols.focus_position
+    def _col_by_index(self, idx):
+        return self.df_browser.display_cols[idx]
 
 def trace_keyp(size, key):
     if key == 'p':

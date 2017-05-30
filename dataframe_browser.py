@@ -1,5 +1,6 @@
 from collections import defaultdict
 import pandas as pd
+import numpy as np
 
 # debug stuff
 import timeit
@@ -482,14 +483,15 @@ class DFBrowser(object):
 #         for s in self.strings:
 #             self.max_width = max(self.max_width, len(s))
 
-def get_dataframe_strings_for_column(df, column_name, top_row, bottom_row, NaN='\n'):
+def get_dataframe_strings_for_column(df, column_name, top_row, bottom_row, justify='right'):
     print('refreshing cache', top_row, bottom_row)
     # data_string = df.ix[top_row:bottom_row,[df.columns.get_loc(column_name)]].to_string(index=False, index_names=False, header=False)
-    data_string = df.ix[top_row:bottom_row].to_string(index=False, index_names=False, header=False, columns=[column_name])
+    data_string = df.ix[top_row:bottom_row].to_string(index=False, index_names=False, header=False,
+                                                      columns=[column_name], justify=justify)
     strs = data_string.split('\n')
     assert len(strs) == bottom_row - top_row
-    while len(strs[0]) < len(strs[1]):
-        strs[0] = ' ' + strs[0]
+    # while len(strs[0]) < len(strs[1]):
+    #     strs[0] = ' ' + strs[0]
     return strs
 
 class DataframeColumnCache(object):
@@ -499,6 +501,7 @@ class DataframeColumnCache(object):
     def __init__(self, src_df_func, column_name, std_cache_size=200, min_cache_on_either_side=50):
         self.get_src_df = src_df_func
         self.column_name = column_name
+        self.is_numeric = np.issubdtype(self.get_src_df()[self.column_name].dtype, np.number)
         self.native_width = None
         self.assigned_width = None
         self.top_of_cache = 0
@@ -507,13 +510,23 @@ class DataframeColumnCache(object):
         self._std_cache_size = std_cache_size
     def _update_native_width(self):
         self.native_width = len(self.column_name)
-        for s in self.row_strings:
+        for idx, s in enumerate(self.row_strings):
             self.native_width = max(self.native_width, len(s))
+            self.row_strings[idx] = s.strip()
+            if not self.is_numeric and self.row_strings[idx] == 'NaN':
+                self.row_strings[idx] = ''
+
     def change_width(self, n):
         if not self.assigned_width:
+            if not self.native_width:
+                self._update_native_width()
             self.assigned_width = self.native_width
         self.assigned_width += n
-        self.assigned_width = max(MIN_WIDTH, min(MIN_WIDTH, self.assigned_width))
+        self.assigned_width = max(DataframeColumnCache.MIN_WIDTH,
+                                  min(DataframeColumnCache.MAX_WIDTH, self.assigned_width))
+    @property
+    def justify(self):
+        return 'right' if self.is_numeric else 'left'
     @property
     def header(self):
         return self.column_name
@@ -530,7 +543,8 @@ class DataframeColumnCache(object):
                                                new_top_of_cache + self._std_cache_size))
         new_cache = None
         if self.top_of_cache > top_row or self.bottom_of_cache < bottom_row:
-            new_cache = get_dataframe_strings_for_column(df, self.column_name, new_top_of_cache, new_bottom_of_cache)
+            new_cache = get_dataframe_strings_for_column(df, self.column_name, new_top_of_cache,
+                                                         new_bottom_of_cache, justify=self.justify)
         if new_cache:
             print('new cache from', new_top_of_cache, 'to', new_bottom_of_cache,
                   len(self.row_strings), len(new_cache))
@@ -539,10 +553,20 @@ class DataframeColumnCache(object):
             self._update_native_width()
         return self.row_strings[top_row-self.top_of_cache : bottom_row-self.top_of_cache]
 
+    def _set_cache(self, string_cache, new_top_of_cache):
+        self.top_of_cache = new_top_of_cache
+        self.row_strings = string_cache
+        self._update_native_width()
+
+    def invalidate_cache(self):
+        self.top_of_cache = 0
+        self.row_strings = list()
+
 class dfcol_defaultdict(defaultdict):
     def __init__(self, get_df):
         self.get_df = get_df
     def __missing__(self, column_name):
+        assert column_name != None
         cc = DataframeColumnCache(lambda : self.get_df(), column_name)
         self[column_name] = cc
         return cc
@@ -589,6 +613,10 @@ class DataframeView(object):
         return self._column_cache[column_name].rows(top_row, bottom_row)
     def selected_row_content(self, column_name):
         return self.df.ix[self._selected_row,column_name]
+    def change_column_width(self, column_name, n):
+        self._column_cache[column_name].change_width(n)
+    def justify(self, column_name):
+        return self._column_cache[column_name].justify
 
     # this method will have to be clever.
     # it will continually print out more and more lines of
@@ -610,7 +638,8 @@ class DataframeView(object):
         assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
 
     def sort(self, column_name, reverse=False):
-        pass
+        self.df_history.sort(column_name, reverse)
+
 
 class DFView(object):
     # this object contains the cached strings for displaying,
