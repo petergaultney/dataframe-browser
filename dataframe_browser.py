@@ -1,4 +1,29 @@
+from collections import defaultdict
 import pandas as pd
+
+# debug stuff
+import timeit
+
+debug_file = open('debug.log', 'w+')
+def myprint(*args):
+    strs = [str(x) for x in args]
+    debug_file.write(' '.join(strs) + '\n')
+    debug_file.flush()
+print = myprint
+
+start_times = list()
+def st():
+    global start_times
+    start_times.append(timeit.default_timer())
+
+def end(name):
+    global start_times
+    elapsed_time = timeit.default_timer() - start_times.pop()
+    if elapsed_time > 5:
+        print('\n')
+    print('{:20} {:10.2f} ms'.format(name, elapsed_time * 1000))
+#end debug stuff
+
 
 # smart frame functions (to make dataframes themselves 'smart')
 def is_smart_frame(df):
@@ -438,6 +463,163 @@ class DFBrowser(object):
             n -= 1
         self._msg_cbs()
 
+    # TODO add redo functionality, to undo an undo.
+    # would only allow redos immediately after undos.
+
+    @property
+    def columns(self):
+        return self.display_cols
+
     def add_change_callback(self, cb):
         if cb not in self.change_cbs:
             self.change_cbs.append(cb)
+
+# class DataframeColumnCache(object):
+#     def __init__(self, column_name, strings):
+#         self.column_name = column_name # also header
+#         self.strings = strings
+#         self.max_width = len(column_name)
+#         for s in self.strings:
+#             self.max_width = max(self.max_width, len(s))
+
+def get_dataframe_strings_for_column(df, column_name, top_row, bottom_row, NaN='\n'):
+    print('refreshing cache', top_row, bottom_row)
+    # data_string = df.ix[top_row:bottom_row,[df.columns.get_loc(column_name)]].to_string(index=False, index_names=False, header=False)
+    data_string = df.ix[top_row:bottom_row].to_string(index=False, index_names=False, header=False, columns=[column_name])
+    strs = data_string.split('\n')
+    assert len(strs) == bottom_row - top_row
+    while len(strs[0]) < len(strs[1]):
+        strs[0] = ' ' + strs[0]
+    return strs
+
+class DataframeColumnCache(object):
+    MIN_WIDTH = 2
+    MAX_WIDTH = 50
+    DEFAULT_CACHE_SIZE = 200
+    def __init__(self, src_df_func, column_name, std_cache_size=200, min_cache_on_either_side=50):
+        self.get_src_df = src_df_func
+        self.column_name = column_name
+        self.native_width = None
+        self.assigned_width = None
+        self.top_of_cache = 0
+        self.row_strings = list()
+        self._min_cache_on_either_side = min_cache_on_either_side
+        self._std_cache_size = std_cache_size
+    def _update_native_width(self):
+        self.native_width = len(self.column_name)
+        for s in self.row_strings:
+            self.native_width = max(self.native_width, len(s))
+    def change_width(self, n):
+        if not self.assigned_width:
+            self.assigned_width = self.native_width
+        self.assigned_width += n
+        self.assigned_width = max(MIN_WIDTH, min(MIN_WIDTH, self.assigned_width))
+    @property
+    def header(self):
+        return self.column_name
+    @property
+    def width(self):
+        return self.assigned_width if self.assigned_width else self.native_width
+    @property
+    def bottom_of_cache(self):
+        return self.top_of_cache + len(self.row_strings)
+    def rows(self, top_row, bottom_row):
+        df = self.get_src_df()
+        new_top_of_cache = max(top_row - self._min_cache_on_either_side, 0)
+        new_bottom_of_cache = min(len(df), max(bottom_row + self._min_cache_on_either_side,
+                                               new_top_of_cache + self._std_cache_size))
+        new_cache = None
+        if self.top_of_cache > top_row or self.bottom_of_cache < bottom_row:
+            new_cache = get_dataframe_strings_for_column(df, self.column_name, new_top_of_cache, new_bottom_of_cache)
+        if new_cache:
+            print('new cache from', new_top_of_cache, 'to', new_bottom_of_cache,
+                  len(self.row_strings), len(new_cache))
+            self.top_of_cache = new_top_of_cache
+            self.row_strings = new_cache
+            self._update_native_width()
+        return self.row_strings[top_row-self.top_of_cache : bottom_row-self.top_of_cache]
+
+class dfcol_defaultdict(defaultdict):
+    def __init__(self, get_df):
+        self.get_df = get_df
+    def __missing__(self, column_name):
+        cc = DataframeColumnCache(lambda : self.get_df(), column_name)
+        self[column_name] = cc
+        return cc
+
+class DataframeView(object):
+    DEFAULT_VIEW_HEIGHT = 100
+    def __init__(self, df_history, normal_cache_size=200, cache_above_top=50):
+        self.df_history = df_history
+        self._top_row = 0 # the top row in the dataframe that's in view
+        self._selected_row = 0
+        # self._normal_cache_size = normal_cache_size
+        # self._normal_cache_above_top = cache_above_top
+        self._view_height = DataframeView.DEFAULT_VIEW_HEIGHT
+        self._column_cache = dfcol_defaultdict(lambda: self.df)
+        # assert self._view_height <= self._normal_cache_size - cache_above_top
+        self.scroll_margin_up = 10
+        self.scroll_margin_down = 30
+
+    # def column_cache(self, column_name):
+    #     if column_name not in self._column_cache:
+    #         self._column_cache[column_name] = DataframeColumnCache(lambda : self.df_history.df, column_name)
+    #     return self._column_cache[column_name]
+
+    # TODO : jump to row, jump to df fraction, jump to column, insert column at point, sort, search, filter
+
+    @property
+    def df(self):
+        return self.df_history.df
+    @property
+    def top_row(self):
+        return self._top_row
+    @property
+    def selected_relative(self):
+        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
+        return self._selected_row - self._top_row
+
+    def header(self, column_name):
+        return self._column_cache[column_name].header
+    def width(self, column_name):
+        return self._column_cache[column_name].width
+    def lines(self, column_name, top_row=None, bottom_row=None):
+        top_row = top_row if top_row != None else self._top_row
+        bottom_row = bottom_row if bottom_row != None else min(top_row + self._view_height, len(self.df))
+        return self._column_cache[column_name].rows(top_row, bottom_row)
+    def selected_row_content(self, column_name):
+        return self.df.ix[self._selected_row,column_name]
+
+    # this method will have to be clever.
+    # it will continually print out more and more lines of
+    # the single column until it either finds a match or reaches the end of the
+    # dataframe column. If it finds a match, it must return the row number
+    # where the item was found.
+    def search(self, column_name, search_string, down=True):
+        pass
+
+    def scroll_rows(self, n):
+        """ positive numbers are scroll down; negative are scroll up"""
+        self._selected_row = max(0, min(self._selected_row + n, len(self.df) - 1))
+        if n > 0:
+            while self._selected_row > self._top_row + self.scroll_margin_down:
+                self._top_row += 1
+        elif n < 0:
+            while self._selected_row < self._top_row + self.scroll_margin_up and self._top_row > 0:
+                self._top_row -= 1
+        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
+
+    def sort(self, column_name, reverse=False):
+        pass
+
+class DFView(object):
+    # this object contains the cached strings for displaying,
+    # as well as the column titles, etc.
+    # searches happen here, because we are simply iterating through the strings
+    # for the next match.
+    # sorts, filters, etc. also happen here, because they modify the dataframe and therefore
+    # require re-computation of the viewing strings.
+    # The history object can be responsible for maintaining the history
+    # of dataframes and column hides/shifts
+    def __init__(self, df_browser):
+        pass
