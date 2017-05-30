@@ -183,6 +183,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         #     self.cached_col_str_lists[col] = generate_strs_for_col(self.df_browser.df, col)
 
     def update_view(self, browser=None):
+        print('updating view')
         if not browser:
             browser = self.df_browser
         # print(str(self.top_row) + ' ' + str(self.focus_row))
@@ -251,7 +252,9 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         elif key == 'H':
             self.hide_current_col()
         elif key == 's':
-            pass # sort? search?
+            self.sort_current_col()
+        elif key == 'r':
+            self.sort_current_col(False)
         elif key == 'f':
             pass # filter?
         elif key == 'a':
@@ -295,7 +298,8 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         self.df_view.change_column_width(self.focus_col, by_n)
         self.urwid_cols.contents[self.focus_pos] = (self.urwid_cols.contents[self.focus_pos][0],
                                                     _given(self.urwid_cols, self.df_view.width(self.focus_col)))
-
+    def sort_current_col(self, ascending=True):
+        self.df_view.sort([self.focus_col], ascending)
     # def mouse_event(self, size, event, button, col, row, focus):
     #     return None
     @property

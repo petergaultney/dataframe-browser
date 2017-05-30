@@ -83,8 +83,9 @@ class DFBrowser(object):
         for cb in self.change_cbs:
             cb(self)
 
-    def sort_cols(self, columns):
-        pass
+    def sort_columns(self, columns, ascending=True, algorithm='mergesort'): # we use mergesort to stay stable
+        sorted_df = self.df.sort_values(columns, ascending=ascending, kind=algorithm)
+        self._change_df(self.df, sorted_df)
 
     def merge_df(self, new_df):
         if self.df is None:
@@ -92,21 +93,11 @@ class DFBrowser(object):
             self.display_cols = list(new_df)
             self._msg_cbs()
             return True
-
-        # assume i already have columns. then get the difference between
-        # my currently displays columns and the columns that this dataframe will add.
-        # if columns are going to change names, it should preferably be
-        # only the new columns that get new names. This allows me to ignore
-        # any name conflicts.
         # do merge
         if self.smerge is not None:
             try:
                 merged_df = self.smerge(self.df, new_df)
-                self.df_hist.append(self.df)
-                self.undo_hist.append(self.df_hist)
-                self.df = merged_df
-                self._msg_cbs()
-                return True
+                return self._change_df(self.df, merged_df)
             except:
                 pass
         return False
@@ -123,6 +114,12 @@ class DFBrowser(object):
             self._msg_cbs()
             return True
         return False
+
+    def _change_df(self, old_df, new_df):
+        self.df_hist.append(old_df)
+        self.undo_hist.append(self.df_hist)
+        self.df = new_df
+        self._msg_cbs()
 
     def add_col(self, col_name, index):
         if col_name in list(self.df):
@@ -244,7 +241,7 @@ class DataframeColumnCache(object):
         self.row_strings = string_cache
         self._update_native_width()
 
-    def invalidate_cache(self):
+    def clear_cache(self):
         self.top_of_cache = 0
         self.row_strings = list()
 
@@ -257,6 +254,14 @@ class dfcol_defaultdict(defaultdict):
         self[column_name] = cc
         return cc
 
+# this object contains the cached strings for displaying,
+# as well as the column titles, etc.
+# searches happen here, because we are simply iterating through the strings
+# for the next match.
+# sorts, filters, etc. also happen here, because they modify the dataframe and therefore
+# require re-computation of the viewing strings.
+# The history object can be responsible for maintaining the history
+# of dataframes and column hides/shifts
 class DataframeView(object):
     DEFAULT_VIEW_HEIGHT = 100
     def __init__(self, df_history, normal_cache_size=200, cache_above_top=50):
@@ -270,11 +275,6 @@ class DataframeView(object):
         # assert self._view_height <= self._normal_cache_size - cache_above_top
         self.scroll_margin_up = 10
         self.scroll_margin_down = 30
-
-    # def column_cache(self, column_name):
-    #     if column_name not in self._column_cache:
-    #         self._column_cache[column_name] = DataframeColumnCache(lambda : self.df_history.df, column_name)
-    #     return self._column_cache[column_name]
 
     # TODO : jump to row, jump to df fraction, jump to column, insert column at point, sort, search, filter
 
@@ -323,18 +323,7 @@ class DataframeView(object):
                 self._top_row -= 1
         assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
 
-    def sort(self, column_name, reverse=False):
-        self.df_history.sort(column_name, reverse)
-
-
-class DFView(object):
-    # this object contains the cached strings for displaying,
-    # as well as the column titles, etc.
-    # searches happen here, because we are simply iterating through the strings
-    # for the next match.
-    # sorts, filters, etc. also happen here, because they modify the dataframe and therefore
-    # require re-computation of the viewing strings.
-    # The history object can be responsible for maintaining the history
-    # of dataframes and column hides/shifts
-    def __init__(self, df_browser):
-        pass
+    def sort(self, column_names, ascending=True):
+        for col_name, cache in self._column_cache.items():
+            cache.clear_cache()
+        self.df_history.sort_columns(column_names, ascending)
