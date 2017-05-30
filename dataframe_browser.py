@@ -139,10 +139,12 @@ class DFBrowser(object):
         while n > 0 and len(self.undo_hist) > 0:
             change_type = self.undo_hist.pop()
             if change_type == self.df_hist:
+                print('attempting to undo df change')
                 self.df = self.df_hist.pop()
             elif change_type == self.display_cols_hist:
                 self.display_cols = self.display_cols_hist.pop()
             else:
+                print('cannot undo this unknown operation')
                 break
             n -= 1
         self._msg_cbs()
@@ -245,6 +247,18 @@ class DataframeColumnCache(object):
         self.top_of_cache = 0
         self.row_strings = list()
 
+    def search_cache(self, search_string, starting_row, down=True):
+        """Returns absolute index where search_string was found; otherwise -1"""
+        offset_row = starting_row - self.top_of_cache
+        search_list = self.row_strings[offset_row:]
+        if not down:
+            search_list = reversed(search_list)
+        for idx, s in enumerate(search_list):
+            if s.find(search_string) != -1:
+                return idx + starting_row
+        return -1
+
+
 class dfcol_defaultdict(defaultdict):
     def __init__(self, get_df):
         self.get_df = get_df
@@ -309,8 +323,13 @@ class DataframeView(object):
     # the single column until it either finds a match or reaches the end of the
     # dataframe column. If it finds a match, it must return the row number
     # where the item was found.
-    def search(self, column_name, search_string, down=True):
-        pass
+    def search(self, column_name, search_string, down=True, skip_current=False):
+        starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
+        df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down)
+        if df_index != -1:
+            self.scroll_rows(df_index - self._selected_row)
+            return True
+        return False
 
     def scroll_rows(self, n):
         """ positive numbers are scroll down; negative are scroll up"""
@@ -323,7 +342,14 @@ class DataframeView(object):
                 self._top_row -= 1
         assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
 
-    def sort(self, column_names, ascending=True):
+    def _clear_cache(self):
         for col_name, cache in self._column_cache.items():
             cache.clear_cache()
+
+    def sort(self, column_names, ascending=True):
+        self._clear_cache()
         self.df_history.sort_columns(column_names, ascending)
+
+    def undo(self, n=1):
+        self._clear_cache()
+        self.df_history.undo(n)
