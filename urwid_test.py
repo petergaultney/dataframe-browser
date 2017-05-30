@@ -45,24 +45,6 @@ def new_display_df_in_cols(urwid_cols, df_view):
     for idx, col_name in enumerate(df_view.df_history.display_cols):
         pile = create_column_pile(urwid_cols, df_view, col_name, idx == focus_col)
         column_width = df_view.width(col_name)
-        # col_disp_attr = 'def' if not idx == focus_col else 'active_col'
-        # column_header = df_view.header(col_name)
-        # column_strings = df_view.lines(col_name)
-        # column_width = df_view.width(col_name)
-        # part_one = column_header
-        # part_one += '\n...\n' if df_view.top_row > 1 and idx == focus_col else '\n\n'
-        # part_one += '\n'.join(column_strings[0:selected_row])
-        # part_two =  '\n'.join(column_strings[selected_row + 1: len(column_strings)])
-        # if idx == focus_col:
-        #     selected_row_attr = 'active_element'
-        #     urwid_browser.modeline.set_text(str(df_view.selected_row_content(col_name))) # TODO this breaks encapsulation
-        # else:
-        #     selected_row_attr = 'active_row'
-        # pile = urwid.Pile([])
-        # pile.contents.append((urwid.AttrMap(SelectableText(part_one), col_disp_attr), ('pack', None)))
-        # pile.contents.append((urwid.AttrMap(SelectableText(column_strings[selected_row]), selected_row_attr), ('pack', None)))
-        # pile.contents.append((urwid.AttrMap(SelectableText(part_two), col_disp_attr), ('pack', None)))
-        # pile.focus_position = 1
         urwid_cols.contents.append((pile, _given(urwid_cols, column_width)))
     try:
         urwid_cols.focus_position = focus_col
@@ -126,21 +108,29 @@ class Minibuffer(urwid.WidgetWrap):
         self.urwid_browser.frame.focus_position = 'footer'
         self.enter_cb = None
     def focus_granted(self, command):
-        self.active_command = command
-        self.edit_text.set_caption(command + ': ')
+        self._set_command(command)
     def focus_removed(self):
         self.active_command = 'browsing'
         self.edit_text.set_caption('browsing... ')
     def give_away_focus(self):
         # this should call back to focus_removed
+        self.edit_text.set_edit_text('')
         self.urwid_browser.focus_browser()
     def merge(self, completion_cb=None):
         # TODO this looks bad
         self.edit_text.setCompletionMethod(completion_cb)
         self.edit_text.set_caption('merge with: ')
         self.urwid_browser.frame.focus_position = 'footer'
+    def _set_command(self, command):
+        self.active_command = command
+        self.edit_text.set_caption(command + ': ')
     def _search(self, search_str, down, skip_current):
-        self.urwid_browser.colview.search_current_col(search_str, down, skip_current)
+        if 'search' in self.active_command:
+            if down:
+                self._set_command('search')
+            else:
+                self._set_command('search backward')
+            self.urwid_browser.colview.search_current_col(search_str, down, skip_current)
     def keypress(self, size, key):
         if key == 'enter':
             name = self.edit_text.get_edit_text()
@@ -152,20 +142,23 @@ class Minibuffer(urwid.WidgetWrap):
             else:
                 self.urwid_browser.modeline.set_text(str(name) + ' not in df')
                 # self.browser.modeline.set_text(str(list(self.browser.colview.df)))
-        elif key == 'esc':
+        elif key == 'esc' or key == 'ctrl g':
             self.give_away_focus()
         elif key == 'ctrl c':
             # raise urwid.ExitMainLoop()
             self.give_away_focus()
         elif key == 'ctrl s':
-            # jump to next search with current string
             self._search(self.edit_text.get_edit_text(), True, True)
+        elif key == 'ctrl r':
+            self._search(self.edit_text.get_edit_text(), False, True)
         else:
             self.edit_text.keypress(size, key)
             if key != 'backspace':
-                if self.active_command.endswith('search'):
-                    print('searching for', self.edit_text.get_edit_text())
+                print('searching for', self.edit_text.get_edit_text())
+                if self.active_command == 'search':
                     self._search(self.edit_text.get_edit_text(), True, False)
+                elif self.active_command == 'search backward':
+                    self._search(self.edit_text.get_edit_text(), False, False)
 
 
 class SelectableText(urwid.Text):
@@ -258,6 +251,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
     def hide_current_col(self):
         return self.df_browser.hide_col_by_index(self.urwid_cols.focus_position)
 
+    # all browsing commands
     def keypress(self, size, key):
         if key in '1234567890':
             # directly select the column #
@@ -271,10 +265,12 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             self.hide_current_col()
         elif key == 'ctrl s':
             self.urwid_browser.focus_minibuffer('search')
+        elif key == 'ctrl r':
+            self.urwid_browser.focus_minibuffer('reverse-search')
         elif key == 's':
             self.sort_current_col()
         elif key == 'r':
-            self.sort_current_col(False)
+            self.sort_current_col(down=False)
         elif key == 'f':
             pass # filter?
         elif key == 'a':
@@ -311,8 +307,14 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             self.change_column_width(1)
         elif key == '-':
             self.change_column_width(-1)
+        elif key == 'meta >':
+            self.df_view.jump(fraction=1.0)
+            self.update_view()
+        elif key == 'meta <':
+            self.df_view.jump(fraction=0.0)
+            self.update_view()
         else:
-            hint('CV: ' + key)
+            hint('got unknown keypress: ' + key)
             return None
     def change_column_width(self, by_n):
         self.df_view.change_column_width(self.focus_col, by_n)

@@ -66,6 +66,8 @@ def shift_list_item(lst, idx, to_right):
 
 # the DFBrowser basically maintains an undo history
 # and helps provide a basic API for how a dataframe can be viewed.
+# TODO provide separate callbacks for when the dataframe itself has changed
+# vs when the column order/set has changed.
 class DFBrowser(object):
     def __init__(self, smart_merger=None):
         self.df = None
@@ -160,25 +162,42 @@ class DFBrowser(object):
         if cb not in self.change_cbs:
             self.change_cbs.append(cb)
 
-# class DataframeColumnCache(object):
-#     def __init__(self, column_name, strings):
-#         self.column_name = column_name # also header
-#         self.strings = strings
-#         self.max_width = len(column_name)
-#         for s in self.strings:
-#             self.max_width = max(self.max_width, len(s))
 
-def get_dataframe_strings_for_column(df, column_name, top_row, bottom_row, justify='right'):
-    print('refreshing cache', top_row, bottom_row)
-    # data_string = df.ix[top_row:bottom_row,[df.columns.get_loc(column_name)]].to_string(index=False, index_names=False, header=False)
-    data_string = df.ix[top_row:bottom_row].to_string(index=False, index_names=False, header=False,
-                                                      columns=[column_name], justify=justify)
-    strs = data_string.split('\n')
-    assert len(strs) == bottom_row - top_row
-    # while len(strs[0]) < len(strs[1]):
-    #     strs[0] = ' ' + strs[0]
-    return strs
+class DataframeColumnSliceToStringList(object):
+    def __init__(self, df, column, justify):
+        self.df = df
+        self.column = column
+        self.justify = justify
+    def __getitem__(self, val):
+        return self.df.iloc[val].to_string(index=False, index_names=False, header=False,
+                                           columns=[self.column], justify=self.justify).split('\n')
+    def __len__(self):
+        return len(self.df)
 
+def not_at_end(lengthable, position, down):
+    return position < len(lengthable) if down else position > 0
+def get_next_chunk(sliceable, start_position, chunk_size, down):
+    """includes start_position, of size chunk_size"""
+    if not down:
+        chunk_beg = max(0, start_position - chunk_size + 1)
+        print('yielding chunk upwards from ', chunk_beg, 'to', start_position + 1)
+        return sliceable[chunk_beg:start_position + 1], chunk_beg
+    else:
+        chunk_end = min(len(sliceable), start_position+chunk_size)
+        print('yielding chunk downwards from ', start_position, 'to', chunk_end)
+        return sliceable[start_position:chunk_end], start_position
+
+def search_chunk_yielder(sliceable, start_location, down=True, chunk_size=100):
+    start_of_next_chunk = start_location
+    while not_at_end(sliceable, start_of_next_chunk, down):
+        yield get_next_chunk(sliceable, start_of_next_chunk, chunk_size, down)
+        start_of_next_chunk = start_of_next_chunk + chunk_size if down else start_of_next_chunk - chunk_size
+    print('exiting yielder')
+    raise StopIteration
+
+
+# TODO allow this class to register directly with the dataframe owner
+# for notification of when the backing dataframe has changed (and therefore the cache is invalid)
 class DataframeColumnCache(object):
     MIN_WIDTH = 2
     MAX_WIDTH = 50
@@ -228,9 +247,9 @@ class DataframeColumnCache(object):
                                                new_top_of_cache + self._std_cache_size))
         new_cache = None
         if self.top_of_cache > top_row or self.bottom_of_cache < bottom_row:
-            new_cache = get_dataframe_strings_for_column(df, self.column_name, new_top_of_cache,
-                                                         new_bottom_of_cache, justify=self.justify)
-        if new_cache:
+            sliceable_df = DataframeColumnSliceToStringList(df, self.column_name, self.justify)
+            new_cache = sliceable_df[new_top_of_cache:new_bottom_of_cache]
+            assert len(new_cache) == new_bottom_of_cache - new_top_of_cache
             print('new cache from', new_top_of_cache, 'to', new_bottom_of_cache,
                   len(self.row_strings), len(new_cache))
             self.top_of_cache = new_top_of_cache
@@ -246,18 +265,46 @@ class DataframeColumnCache(object):
     def clear_cache(self):
         self.top_of_cache = 0
         self.row_strings = list()
+        self._search_cache = list()
 
     def search_cache(self, search_string, starting_row, down=True):
         """Returns absolute index where search_string was found; otherwise -1"""
-        offset_row = starting_row - self.top_of_cache
-        search_list = self.row_strings[offset_row:]
-        if not down:
-            search_list = reversed(search_list)
-        for idx, s in enumerate(search_list):
-            if s.find(search_string) != -1:
-                return idx + starting_row
-        return -1
+        print('***** NEW SEARCH', self.column_name, search_string, starting_row, down)
+        starting_row_in_cache = starting_row - self.top_of_cache
+        print('running search on current cache')
+        row_idx = search_list_for_str(self.row_strings, search_string, starting_row_in_cache, down)
+        if row_idx != None:
+            print('found item at row_idx', row_idx + self.top_of_cache)
+            return row_idx + self.top_of_cache
+        else:
+            print('failed local cache search - moving on to iterate through dataframe')
+            # search progressively through dataframe starting from end of cache.
+            # it probably makes sense to generate the strings iteratively, since in the end
+            # we are only interested in finding the first result, and a massive dataframe
+            # would absolutely destroy performance without a 'window'
+            end_of_cache_search = self.top_of_cache + len(self.row_strings) if down else self.top_of_cache
+            df_sliceable = DataframeColumnSliceToStringList(self.get_src_df(), self.column_name, self.justify)
+            for chunk, chunk_start_idx in search_chunk_yielder(df_sliceable, end_of_cache_search, down):
+                # print('chunk being searched', chunk, chunk_start_idx)
+                row_idx = search_list_for_str(chunk, search_string, 0 if down else len(chunk) - 1, down)
+                if row_idx != None:
+                    actual_idx = row_idx + chunk_start_idx
+                    print('found', search_string, 'at', chunk_start_idx, row_idx, actual_idx, self.get_src_df().iloc[actual_idx])
+                    return actual_idx
+                else:
+                    print('not found in this chunk...')
+            return None
 
+
+def search_list_for_str(lst, search_string, starting_item, down=True):
+    """returns index into list representing string found, or None if not found"""
+    search_list = lst[starting_item:] if down else reversed(lst[:starting_item+1])
+    print('searching list ', 'down' if down else 'up', 'from', starting_item, 'to end of list; for:', search_string)
+    for idx, s in enumerate(search_list):
+        if s.find(search_string) != -1:
+            print('found! ', s, idx, starting_item, len(lst), down)
+            return starting_item + idx if down else starting_item - idx
+    return None
 
 class dfcol_defaultdict(defaultdict):
     def __init__(self, get_df):
@@ -268,12 +315,19 @@ class dfcol_defaultdict(defaultdict):
         self[column_name] = cc
         return cc
 
-# this object contains the cached strings for displaying,
-# as well as the column titles, etc.
+# Note that DataframeBrowser (i.e. history) is responsible for the columns of the dataframe and the dataframe itself
+# whereas this class is responsible for the view into the rows.
+# This decision is based on the fact that scrolling up and down through a dataset
+# is not considered to be a useful 'undo' operation, since it is immediately reversible,
+# whereas column operations (re-order, hide, etc) are reversible with extra work (they require typing column names)
+# A counterpoint to this is 'jumping' through the rows - some users might find it handy to be able
+# to return to their previous row position after a jump. But as of now, it's hard to see
+# what the right way of handling that would be.
 # searches happen here, because we are simply iterating through the strings
 # for the next match.
 # sorts, filters, etc. also happen here, because they modify the dataframe and therefore
-# require re-computation of the viewing strings.
+# require re-computation of the viewing strings. This eventually could change
+# if the individual column views could register for callbacks during dataframe changes.
 # The history object can be responsible for maintaining the history
 # of dataframes and column hides/shifts
 class DataframeView(object):
@@ -282,15 +336,14 @@ class DataframeView(object):
         self.df_history = df_history
         self._top_row = 0 # the top row in the dataframe that's in view
         self._selected_row = 0
-        # self._normal_cache_size = normal_cache_size
-        # self._normal_cache_above_top = cache_above_top
         self._view_height = DataframeView.DEFAULT_VIEW_HEIGHT
         self._column_cache = dfcol_defaultdict(lambda: self.df)
-        # assert self._view_height <= self._normal_cache_size - cache_above_top
-        self.scroll_margin_up = 10
-        self.scroll_margin_down = 30
+        self.scroll_margin_up = 10 # TODO these are very arbitrary and honestly it might be better
+        self.scroll_margin_down = 30 # if they didn't exist inside this class at all.
+        # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
+        # from which the search should begin.
 
-    # TODO : jump to row, jump to df fraction, jump to column, insert column at point, sort, search, filter
+    # TODO : jump to column, insert column at point, full search, filter/where
 
     @property
     def df(self):
@@ -324,12 +377,20 @@ class DataframeView(object):
     # dataframe column. If it finds a match, it must return the row number
     # where the item was found.
     def search(self, column_name, search_string, down=True, skip_current=False):
+        print(skip_current)
         starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
         df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down)
-        if df_index != -1:
+        if df_index != None:
             self.scroll_rows(df_index - self._selected_row)
             return True
+        # TODO implement search beyond cache
         return False
+
+    def jump(self, fraction=None, pos=None):
+        if fraction != None:
+            assert fraction >= 0.0 and fraction <= 1.0
+            pos = fraction * len(self.df)
+        self.scroll_rows(pos - self._selected_row)
 
     def scroll_rows(self, n):
         """ positive numbers are scroll down; negative are scroll up"""
