@@ -5,7 +5,7 @@ import sys, re, os
 import pandas as pd
 import dataframe_browser
 from dataframe_browser import print, st, end
-
+from smartmerge import DataframeSmartMerger
 
 PAGE_SIZE = 20
 
@@ -366,7 +366,7 @@ def hint(text):
         urwid_browser.helper.set_text(text)
 
 def read_all_dfs_from_dir(directory):
-    df_merger = dataframe_browser.DataFrameSmartMerger()
+    df_merger = DataframeSmartMerger()
     for fn in os.listdir(directory):
         df = pd.DataFrame.from_csv(directory + os.sep + fn)
         df_merger.add(df, fn[:-4])
