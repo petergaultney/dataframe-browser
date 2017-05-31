@@ -4,7 +4,6 @@ import urwid_utils
 import sys, re, os
 import pandas as pd
 import dataframe_browser
-from dataframe_browser import print, st, end
 from smartmerge import DataframeSmartMerger
 
 from _debug import *

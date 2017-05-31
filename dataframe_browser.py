@@ -152,8 +152,10 @@ class DataframeColumnSliceToStringList(object):
     def __len__(self):
         return len(self.df)
 
+# chunk search utils
 def not_at_end(lengthable, position, down):
     return position < len(lengthable) if down else position > 0
+
 def get_next_chunk(sliceable, start_position, chunk_size, down):
     """includes start_position, of size chunk_size"""
     if not down:
@@ -170,7 +172,6 @@ def search_chunk_yielder(sliceable, start_location, down=True, chunk_size=100):
     while not_at_end(sliceable, start_of_next_chunk, down):
         yield get_next_chunk(sliceable, start_of_next_chunk, chunk_size, down)
         start_of_next_chunk = start_of_next_chunk + chunk_size if down else start_of_next_chunk - chunk_size
-    print('exiting yielder')
     raise StopIteration
 
 
