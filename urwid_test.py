@@ -16,25 +16,12 @@ PAGE_SIZE = 20
 # ui.tty_signal_keys('undefined', 'undefined', 'undefined', 'undefined',
 #                    'undefined')
 
-def generate_str_for_col(df, col_name, top_row=0, bot_row=None):
-    if not bot_row:
-        bot_row = len(df) # TODO
-    string = df[[col_name]].iloc[top_row:bot_row].to_string(index=False) # slower - makes a copy
-    # string = col_name + '\n\n'
-    # string += df.ix[top_row:bot_row,col_name].to_string(index=False) # faster
-    all_strs = string.split('\n')
-    assert len(all_strs[0].strip()) != 0 # need a non-blank column label
-    while len(all_strs[1].strip()) == 0 or all_strs[1] == 'itemName':
-        del all_strs[1]
-    # assert len(all_strs) - 1 == len(df)
-    return all_strs
-
 def _pack(columns): # this just exists to cut down code bloat
     return columns.options(width_type='pack')
 def _given(columns, width):
     return columns.options('given', width)
 
-def new_display_df_in_cols(urwid_cols, df_view):
+def display_df_in_urwid_columns(urwid_cols, df_view):
     # end('kp to kp') # DEBUG
     # st() # DEBUG
     # st() # DEBUG
@@ -185,23 +172,14 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         self.urwid_browser = urwid_browser
         self.df_browser = df_browser
         self.df_view = dataframe_browser.DataframeView(self.df_browser)
-        # self.col_viewer = col_viewer
         self.urwid_cols = urwid.Columns([], dividechars=1)
-        # self.top_row = 0
-        # self.focus_row = 0
         urwid.WidgetWrap.__init__(self, self.urwid_cols)
-        # self.cached_col_str_lists = dict()
-        # for col in self.df_browser.display_cols:
-        #     self.cached_col_str_lists[col] = generate_strs_for_col(self.df_browser.df, col)
 
     def update_view(self, browser=None):
         print('updating view')
         if not browser:
             browser = self.df_browser
-        # print(str(self.top_row) + ' ' + str(self.focus_row))
-        # disp_df_in_cols(self.urwid_cols, browser.df, browser.display_cols,
-        #                 self.cached_col_str_lists, self.top_row, self.focus_row)
-        new_display_df_in_cols(self.urwid_cols, self.df_view)
+        display_df_in_urwid_columns(self.urwid_cols, self.df_view)
         self.update_text()
 
     def update_text(self):
@@ -220,31 +198,34 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         self.df_view.scroll_rows(num_rows)
         self.update_view()
 
-    def set_focus(self, num):
-        if num < 0:
-            num = 0
-        if num >= len(self.urwid_cols.contents):
-            num = len(self.urwid_cols.contents) - 1
+    def set_focus(self, col_num):
+        col_num = max(0, min(col_num, len(self.urwid_cols.contents) - 1))
         try:
             focus_pos = self.urwid_cols.focus_position
-            if self.urwid_cols.focus_position != num:
+            if self.urwid_cols.focus_position != col_num:
                 set_attrib_on_col_pile(self.urwid_cols.contents[focus_pos][0], False)
-                set_attrib_on_col_pile(self.urwid_cols.contents[num][0], True)
-                self.urwid_cols.focus_position = num
+                set_attrib_on_col_pile(self.urwid_cols.contents[col_num][0], True)
+                self.urwid_cols.focus_position = col_num
                 self.update_text()
             return True
         except Exception as e:
-            hint('failed to set focus to '+ str(num + 1))
+            hint('failed to set focus to '+ str(col_num + 1))
             print('exception in set focus' + e)
             return False
 
     def search_current_col(self, search_string, down=True, skip_current=False):
         if self.df_view.search(self.focus_col, search_string, down, skip_current):
             self.update_view()
+        else:
+            # TODO could print help text saying the search failed.
+            # TODO also, could potentially try wrapping the search just like emacs...
+            pass
+
 
     def undo(self):
         self.df_view.undo()
 
+    # TODO verify that this works...
     def add_col(self, col_name, idx=None):
         try:
             if not idx or idx < 0 or idx > self.urwid_cols.focus_position:
@@ -301,11 +282,11 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         elif key == ',' or key == '>':
             if self.df_browser.shift_column(self.urwid_cols.focus_position, -1):
                 self.urwid_cols.focus_position -= 1
-                self.update_view() # TODO this incurs a double update penalty
+                self.update_view() # TODO this incurs a double update penalty but is necessary because the focus_position can't change until we know that the shift column was actually doable/successful
         elif key == '.' or key == '<':
             if self.df_browser.shift_column(self.urwid_cols.focus_position, 1):
                 self.urwid_cols.focus_position += 1
-                self.update_view()
+                self.update_view() # TODO this incurs a double update penalty but is necessary because the focus_position can't change until we know that the shift column was actually doable/successful
         elif key == '=' or key == '+':
             self.change_column_width(1)
         elif key == '-':
@@ -411,23 +392,8 @@ def start_browser(df_sm, df_name='dubois_mathlete_identities'):
 if __name__ == '__main__':
     # pd.set_option('display.max_rows', 9999)
     # pd.set_option('display.width', None)
-
-    # import dubois
-    # conn = dubois.get_admin_conn()
-
-    # import datetime_utils
-    # print('Welcome to the DuBois Project Data Explorer!')
-    # print('Press TAB twice at any time to view the available commands or options.')
-    # print('Use Ctrl-C to return to previous level, and Ctrl-D to quit.')
-    # # start readline
-    # import readline
-    # readline.parse_and_bind('tab: complete')
-
     try:
         local_data = sys.argv[1]
         start_browser(read_all_dfs_from_dir(local_data))
     except (KeyboardInterrupt, EOFError) as e:
         print('\nLeaving the DuBois Project Data Explorer.')
-
-# if __name__ == '__main__':
-#     start_interactive_query_loop(conn)

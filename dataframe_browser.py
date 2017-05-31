@@ -247,6 +247,7 @@ class DataframeColumnCache(object):
 
     def search_cache(self, search_string, starting_row, down=True):
         """Returns absolute index where search_string was found; otherwise -1"""
+        # TODO this code 100% works, but could it be cleaner?
         print('***** NEW SEARCH', self.column_name, search_string, starting_row, down)
         starting_row_in_cache = starting_row - self.top_of_cache
         print('running search on current cache, starting at row ', starting_row_in_cache)
@@ -319,7 +320,7 @@ class DataframeView(object):
         # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
         # from which the search should begin.
 
-    # TODO : jump to column, insert column at point, full search, filter/where
+    # TODO : jump to column, insert column at point, filter/where
 
     @property
     def df(self):
@@ -347,18 +348,14 @@ class DataframeView(object):
     def justify(self, column_name):
         return self._column_cache[column_name].justify
 
-    # this method will have to be clever.
-    # it will continually print out more and more lines of
-    # the single column until it either finds a match or reaches the end of the
-    # dataframe column. If it finds a match, it must return the row number
-    # where the item was found.
     def search(self, column_name, search_string, down=True, skip_current=False):
+        """search downward or upward in the current column for a string match.
+        Can exclude the current row in order to search 'farther' in the dataframe."""
         starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
         df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down)
         if df_index != None:
             self.scroll_rows(df_index - self._selected_row)
             return True
-        # TODO implement search beyond cache
         return False
 
     def jump(self, fraction=None, pos=None):
@@ -372,7 +369,7 @@ class DataframeView(object):
         self._selected_row = max(0, min(self._selected_row + n, len(self.df) - 1))
         if n > 0:
             while self._selected_row > self._top_row + self.scroll_margin_down:
-                self._top_row += 1
+                self._top_row += 1 # TODO this could be faster
         elif n < 0:
             while self._selected_row < self._top_row + self.scroll_margin_up and self._top_row > 0:
                 self._top_row -= 1
