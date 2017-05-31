@@ -7,6 +7,8 @@ import dataframe_browser
 from dataframe_browser import print, st, end
 from smartmerge import DataframeSmartMerger
 
+from _debug import *
+
 PAGE_SIZE = 20
 
 # this stuff captures Ctrl-C
@@ -84,12 +86,13 @@ def set_attrib_on_col_pile(pile, is_focus_col):
 
 class Modeline(urwid.WidgetWrap):
     def __init__(self):
-        self.text = urwid.Text('Help Area')
+        self.text = urwid.Text('Welcome to the Dataframe browser!')
         urwid.WidgetWrap.__init__(self, self.text)
     def set_text(self, text):
         self.text.set_text(text)
     def show_basic_commands(self):
-        self.set_text('(hjkl) move focus; (H)ide; (u)ndo; (m)erge; (+-) adjust col size; (,.) shift col; / enter command mode')
+        # help text
+        self.set_text('(hjkl) browse; (H)ide col; (u)ndo; (+-) size col; (,.) move col; (ctrl-s)ea(r)ch col; (s)o(r)t')
     def show_command_options(self):
         self.set_text('type column name to add, then press enter. Press Esc to return to browsing.')
     def keypress(self, size, key):
@@ -156,8 +159,10 @@ class Minibuffer(urwid.WidgetWrap):
             if key != 'backspace':
                 print('searching for', self.edit_text.get_edit_text())
                 if self.active_command == 'search':
+                    print('asking for forward search')
                     self._search(self.edit_text.get_edit_text(), True, False)
                 elif self.active_command == 'search backward':
+                    print('asking for backward search')
                     self._search(self.edit_text.get_edit_text(), False, False)
 
 
@@ -230,7 +235,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             return True
         except Exception as e:
             hint('failed to set focus to '+ str(num + 1))
-            print(e)
+            print('exception in set focus' + e)
             return False
 
     def search_current_col(self, search_string, down=True, skip_current=False):
@@ -266,11 +271,11 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         elif key == 'ctrl s':
             self.urwid_browser.focus_minibuffer('search')
         elif key == 'ctrl r':
-            self.urwid_browser.focus_minibuffer('reverse-search')
+            self.urwid_browser.focus_minibuffer('search backward')
         elif key == 's':
             self.sort_current_col()
         elif key == 'r':
-            self.sort_current_col(down=False)
+            self.sort_current_col(ascending=False)
         elif key == 'f':
             pass # filter?
         elif key == 'a':
@@ -291,8 +296,6 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             self.scroll(-PAGE_SIZE)
         elif key == 'page down':
             self.scroll(PAGE_SIZE)
-        elif key == '/':
-            self.urwid_browser.focus_minibuffer()
         elif key == '?':
             self.urwid_browser.modeline.show_basic_commands()
         elif key == ',' or key == '>':
@@ -321,7 +324,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         self.urwid_cols.contents[self.focus_pos] = (self.urwid_cols.contents[self.focus_pos][0],
                                                     _given(self.urwid_cols, self.df_view.width(self.focus_col)))
     def sort_current_col(self, ascending=True):
-        self.df_view.sort([self.focus_col], ascending)
+        self.df_view.sort([self.focus_col], ascending=ascending)
     # def mouse_event(self, size, event, button, col, row, focus):
     #     return None
     @property
@@ -342,7 +345,7 @@ def trace_keyp(size, key):
 palette = [
     ('active_col', 'light blue', 'black'),
     ('def', 'white', 'black'),
-    ('help', 'black', 'light gray'),
+    ('modeline', 'black', 'light gray'),
     ('moving', 'light red', 'black'),
     ('active_row', 'dark red', 'black'),
     ('active_element', 'yellow', 'black'),
@@ -358,7 +361,7 @@ class UrwidDFBrowser:
         self.colview = UrwidDFColumnView(self, self.df_browser)
         self.df_browser.add_change_callback(self.colview.update_view)
         self.inner_frame = urwid.Frame(urwid.Filler(self.colview, valign='top'),
-                                       footer=urwid.AttrMap(self.modeline, 'help'))
+                                       footer=urwid.AttrMap(self.modeline, 'modeline'))
         self.frame = urwid.Frame(self.inner_frame, footer=self.minibuffer)
     def start(self):
         self.loop = urwid.MainLoop(self.frame, palette, # input_filter=self.input,

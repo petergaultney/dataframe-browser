@@ -3,29 +3,7 @@ import pandas as pd
 import numpy as np
 from smartmerge import DataframeSmartMerger
 
-# UI debug printing
-import timeit
-
-debug_file = open('debug.log', 'w+')
-def myprint(*args):
-    strs = [str(x) for x in args]
-    debug_file.write(' '.join(strs) + '\n')
-    debug_file.flush()
-print = myprint
-
-start_times = list()
-def st():
-    global start_times
-    start_times.append(timeit.default_timer())
-
-def end(name):
-    global start_times
-    elapsed_time = timeit.default_timer() - start_times.pop()
-    if elapsed_time > 5:
-        print('\n')
-    print('{:20} {:10.2f} ms'.format(name, elapsed_time * 1000))
-#end debug stuff
-
+from _debug import *
 
 def add_column(columns, col_name, index):
     if col_name in columns and columns[index] == col_name:
@@ -184,7 +162,7 @@ def get_next_chunk(sliceable, start_position, chunk_size, down):
         return sliceable[chunk_beg:start_position + 1], chunk_beg
     else:
         chunk_end = min(len(sliceable), start_position+chunk_size)
-        print('yielding chunk downwards from ', start_position, 'to', chunk_end)
+        print('yielding chunk downwards from', start_position, 'to', chunk_end)
         return sliceable[start_position:chunk_end], start_position
 
 def search_chunk_yielder(sliceable, start_location, down=True, chunk_size=100):
@@ -271,25 +249,22 @@ class DataframeColumnCache(object):
         """Returns absolute index where search_string was found; otherwise -1"""
         print('***** NEW SEARCH', self.column_name, search_string, starting_row, down)
         starting_row_in_cache = starting_row - self.top_of_cache
-        print('running search on current cache')
+        print('running search on current cache, starting at row ', starting_row_in_cache)
         row_idx = search_list_for_str(self.row_strings, search_string, starting_row_in_cache, down)
         if row_idx != None:
             print('found item at row_idx', row_idx + self.top_of_cache)
             return row_idx + self.top_of_cache
         else:
             print('failed local cache search - moving on to iterate through dataframe')
-            # search progressively through dataframe starting from end of cache.
-            # it probably makes sense to generate the strings iteratively, since in the end
-            # we are only interested in finding the first result, and a massive dataframe
-            # would absolutely destroy performance without a 'window'
+            # search by chunk through dataframe starting from current search position in cache
             end_of_cache_search = self.top_of_cache + len(self.row_strings) if down else self.top_of_cache
             df_sliceable = DataframeColumnSliceToStringList(self.get_src_df(), self.column_name, self.justify)
             for chunk, chunk_start_idx in search_chunk_yielder(df_sliceable, end_of_cache_search, down):
-                # print('chunk being searched', chunk, chunk_start_idx)
-                row_idx = search_list_for_str(chunk, search_string, 0 if down else len(chunk) - 1, down)
-                if row_idx != None:
-                    actual_idx = row_idx + chunk_start_idx
-                    print('found', search_string, 'at', chunk_start_idx, row_idx, actual_idx, self.get_src_df().iloc[actual_idx])
+                chunk_idx = search_list_for_str(chunk, search_string, 0 if down else len(chunk) - 1, down)
+                if chunk_idx != None:
+                    actual_idx = chunk_idx + chunk_start_idx
+                    print('found', search_string, 'at chunk idx', chunk_idx, 'in chunk starting at', chunk_start_idx,
+                          'which makes real idx', actual_idx, 'with result proof:', self.get_src_df().ix[actual_idx,self.column_name])
                     return actual_idx
                 else:
                     print('not found in this chunk...')
@@ -298,11 +273,12 @@ class DataframeColumnCache(object):
 
 def search_list_for_str(lst, search_string, starting_item, down=True):
     """returns index into list representing string found, or None if not found"""
+    search_slice_end = len(lst) if down else 0
     search_list = lst[starting_item:] if down else reversed(lst[:starting_item+1])
-    print('searching list ', 'down' if down else 'up', 'from', starting_item, 'to end of list; for:', search_string)
+    print('searching list of size', len(lst), 'down' if down else 'up', 'from', starting_item, 'to', search_slice_end, 'for:', search_string)
     for idx, s in enumerate(search_list):
         if s.find(search_string) != -1:
-            print('found! ', s, idx, starting_item, len(lst), down)
+            print('found! ', s, 'at', idx, 'starting from', starting_item, 'in list of len', len(lst), 'down?', down)
             return starting_item + idx if down else starting_item - idx
     return None
 
@@ -377,7 +353,6 @@ class DataframeView(object):
     # dataframe column. If it finds a match, it must return the row number
     # where the item was found.
     def search(self, column_name, search_string, down=True, skip_current=False):
-        print(skip_current)
         starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
         df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down)
         if df_index != None:
