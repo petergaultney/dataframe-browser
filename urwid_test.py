@@ -5,6 +5,7 @@ import sys, re, os
 import pandas as pd
 import dataframe_browser
 from smartmerge import DataframeSmartMerger
+from keybindings import keybs
 
 from _debug import *
 
@@ -90,16 +91,17 @@ class Minibuffer(urwid.WidgetWrap):
         self.edit_text = urwid_utils.AdvancedEdit(caption='browsing... ', multiline=False)
         urwid.WidgetWrap.__init__(self, self.edit_text)
         self.active_command = 'browsing'
+        self.active_args = None
     def add(self, completion_cb=None):
         if completion_cb is not None:
             self.edit_text.setCompletionMethod(completion_cb)
         self.edit_text.set_caption('add column: ')
         self.urwid_browser.frame.focus_position = 'footer'
         self.enter_cb = None
-    def focus_granted(self, command):
-        self._set_command(command)
+    def focus_granted(self, command, **kwargs):
+        self._set_command(command, **kwargs)
     def focus_removed(self):
-        self.active_command = 'browsing'
+        self._set_command('browsing')
         self.edit_text.set_caption('browsing... ')
     def give_away_focus(self):
         # this should call back to focus_removed
@@ -110,9 +112,13 @@ class Minibuffer(urwid.WidgetWrap):
         self.edit_text.setCompletionMethod(completion_cb)
         self.edit_text.set_caption('merge with: ')
         self.urwid_browser.frame.focus_position = 'footer'
-    def _set_command(self, command):
+    def _set_command(self, command, **kwargs):
         self.active_command = command
+        self.active_args = kwargs
         self.edit_text.set_caption(command + ': ')
+        if self.active_command == 'query':
+            self.edit_text.set_edit_text(self.active_args['column_name'])
+            self.edit_text.set_edit_pos(len(self.edit_text.get_edit_text()))
     def _search(self, search_str, down, skip_current):
         if 'search' in self.active_command:
             if down:
@@ -122,15 +128,17 @@ class Minibuffer(urwid.WidgetWrap):
             self.urwid_browser.colview.search_current_col(search_str, down, skip_current)
     def keypress(self, size, key):
         if key == 'enter':
-            name = self.edit_text.get_edit_text()
-            print(name)
-            if self.urwid_browser.colview.add_col(name):
-                # we accept this input
-                self.edit_text.set_edit_text('')
-                self.urwid_browser.frame.focus_position = 'body'
-            else:
-                self.urwid_browser.modeline.set_text(str(name) + ' not in df')
-                # self.browser.modeline.set_text(str(list(self.browser.colview.df)))
+            cmd_str = self.edit_text.get_edit_text()
+            print('handling input string', cmd_str)
+            if self.active_command == 'query':
+                self.urwid_browser.df_view.query(cmd_str)
+                self.give_away_focus()
+            elif self.active_command == 'add':
+                if self.urwid_browser.colview.add_col(cmd_str):
+                    self.give_away_focus()
+                else:
+                    self.urwid_browser.modeline.set_text(str(name) + ' not in df')
+                    # self.browser.modeline.set_text(str(list(self.browser.colview.df)))
         elif key == 'esc' or key == 'ctrl g':
             self.give_away_focus()
         elif key == 'ctrl c':
@@ -167,10 +175,10 @@ class SelectableText(urwid.Text):
 
 
 class UrwidDFColumnView(urwid.WidgetWrap):
-    def __init__(self, urwid_browser, df_browser):
+    def __init__(self, urwid_browser, df_browser, df_view):
         self.urwid_browser = urwid_browser
         self.df_browser = df_browser
-        self.df_view = dataframe_browser.DataframeView(self.df_browser)
+        self.df_view = df_view
         self.urwid_cols = urwid.Columns([], dividechars=1)
         urwid.WidgetWrap.__init__(self, self.urwid_cols)
 
@@ -238,64 +246,67 @@ class UrwidDFColumnView(urwid.WidgetWrap):
 
     # BROWSE COMMANDS
     def keypress(self, size, key):
-        if key in '1234567890':
-            # directly select the column #
-            num = int(key) - 1
-            if num == -1:
-                num = 9
-            self.set_focus(num)
-        elif key == 'm':
+        # TODO move key bindings into dict of arrays
+        if key in keybs('merge'):
             urwid_browser.minibuffer.merge(urwid_utils.ListCompleter(list(self.df_browser.smerge)))
-        elif key == 'H':
+        elif key in keybs('hide'):
             self.hide_current_col()
-        elif key == 'ctrl s':
+        elif key in keybs('search down'):
             self.urwid_browser.focus_minibuffer('search')
-        elif key == 'ctrl r':
+        elif key in keybs('search up'):
             self.urwid_browser.focus_minibuffer('search backward')
-        elif key == 's':
-            self.sort_current_col()
-        elif key == 'r':
+        elif key in keybs('sort ascending'):
+            self.sort_current_col(ascending=True)
+        elif key in keybs('sort descending'):
             self.sort_current_col(ascending=False)
         elif key == 'f':
             pass # filter?
         elif key == 'a':
             urwid_browser.minibuffer.add(urwid_utils.ListCompleter(list(self.df_browser.df), hint).complete)
-        elif key == 'right' or key=='l':
+        elif key in keybs('browse right'):
             self.set_focus(self.urwid_cols.focus_position + 1)
-        elif key == 'left' or key == 'h':
+        elif key in keybs('browse left'):
             self.set_focus(self.urwid_cols.focus_position - 1)
-        elif key == 'down' or key == 'j':
+        elif key in keybs('browse down'):
             self.scroll(+1)
-        elif key == 'up' or key == 'k':
+        elif key in keybs('browse up'):
             self.scroll(-1)
-        elif key == 'u':
+        elif key in keybs('undo'):
             self.undo()
-        elif key == 'q':
+        elif key in keybs('quit'):
             raise urwid.ExitMainLoop()
-        elif key == 'page up':
+        elif key in keybs('query'):
+            self.urwid_browser.focus_minibuffer('query', column_name=self.focus_col)
+        elif key in keybs('page up'):
             self.scroll(-PAGE_SIZE)
-        elif key == 'page down':
+        elif key in keybs('page down'):
             self.scroll(PAGE_SIZE)
-        elif key == '?':
+        elif key in keybs('help'):
             self.urwid_browser.modeline.show_basic_commands()
-        elif key == ',' or key == '>':
+        elif key in keybs('shift column left'):
             if self.df_browser.shift_column(self.urwid_cols.focus_position, -1):
                 self.urwid_cols.focus_position -= 1
                 self.update_view() # TODO this incurs a double update penalty but is necessary because the focus_position can't change until we know that the shift column was actually doable/successful
-        elif key == '.' or key == '<':
+        elif key in keybs('shift column right'):
             if self.df_browser.shift_column(self.urwid_cols.focus_position, 1):
                 self.urwid_cols.focus_position += 1
                 self.update_view() # TODO this incurs a double update penalty but is necessary because the focus_position can't change until we know that the shift column was actually doable/successful
-        elif key == '=' or key == '+':
+        elif key in keybs('increase column width'):
             self.change_column_width(1)
-        elif key == '-':
+        elif key in keybs('decrease column width'):
             self.change_column_width(-1)
-        elif key == 'meta >':
+        elif key in keybs('jump to last row'):
             self.df_view.jump(fraction=1.0)
             self.update_view()
-        elif key == 'meta <':
+        elif key in keybs('jump to first row'):
             self.df_view.jump(fraction=0.0)
             self.update_view()
+        elif key in keybs('jump to numeric column'):
+            # directly select the column #
+            num = int(key) - 1
+            if num == -1:
+                num = 9
+            self.set_focus(num)
         else:
             hint('got unknown keypress: ' + key)
             return None
@@ -335,10 +346,11 @@ palette = [
 class UrwidDFBrowser:
     def __init__(self, smart_merger=None):
         self.df_browser = dataframe_browser.DFBrowser(smart_merger)
+        self.df_view = dataframe_browser.DataframeView(self.df_browser)
         self.modeline = Modeline()
         self.modeline.show_basic_commands()
         self.minibuffer = Minibuffer(self)
-        self.colview = UrwidDFColumnView(self, self.df_browser)
+        self.colview = UrwidDFColumnView(self, self.df_browser, self.df_view)
         self.df_browser.add_change_callback(self.colview.update_view)
         self.inner_frame = urwid.Frame(urwid.Filler(self.colview, valign='top'),
                                        footer=urwid.AttrMap(self.modeline, 'modeline'))
@@ -347,9 +359,9 @@ class UrwidDFBrowser:
         self.loop = urwid.MainLoop(self.frame, palette, # input_filter=self.input,
                                    unhandled_input=self.unhandled_input)
         self.loop.run()
-    def focus_minibuffer(self, command):
+    def focus_minibuffer(self, command, **kwargs):
         self.frame.focus_position = 'footer'
-        self.minibuffer.focus_granted(command)
+        self.minibuffer.focus_granted(command, **kwargs)
         self.modeline.show_command_options()
     def focus_browser(self):
         self.frame.focus_position = 'body'
@@ -387,6 +399,7 @@ def start_browser(df_sm, df_name='dubois_mathlete_identities'):
     urwid_browser = UrwidDFBrowser(df_sm)
     urwid_browser.df_browser.merge_df(df_sm[df_name])
     urwid_browser.start()
+    return urwid_browser
 
 if __name__ == '__main__':
     # pd.set_option('display.max_rows', 9999)

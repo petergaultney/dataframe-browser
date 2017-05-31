@@ -140,6 +140,10 @@ class DFBrowser(object):
         if cb not in self.change_cbs:
             self.change_cbs.append(cb)
 
+    def query(self, query_str):
+        new_df = self.df.query(query_str)
+        return self._change_df(self.df, new_df)
+
 
 class DataframeColumnSliceToStringList(object):
     def __init__(self, df, column, justify):
@@ -389,3 +393,7 @@ class DataframeView(object):
     def undo(self, n=1):
         self._clear_cache()
         self.df_history.undo(n)
+
+    def query(self, query_string):
+        self._clear_cache()
+        self.df_history.query(query_string)
