@@ -244,15 +244,14 @@ class DataframeColumnCache(object):
     def clear_cache(self):
         self.top_of_cache = 0
         self.row_strings = list()
-        self._search_cache = list()
 
-    def search_cache(self, search_string, starting_row, down=True):
+    def search_cache(self, search_string, starting_row, down, case_insensitive):
         """Returns absolute index where search_string was found; otherwise -1"""
         # TODO this code 100% works, but could it be cleaner?
-        print('***** NEW SEARCH', self.column_name, search_string, starting_row, down)
+        print('***** NEW SEARCH', self.column_name, search_string, starting_row, down, case_insensitive)
         starting_row_in_cache = starting_row - self.top_of_cache
         print('running search on current cache, starting at row ', starting_row_in_cache)
-        row_idx = search_list_for_str(self.row_strings, search_string, starting_row_in_cache, down)
+        row_idx = search_list_for_str(self.row_strings, search_string, starting_row_in_cache, down, case_insensitive)
         if row_idx != None:
             print('found item at row_idx', row_idx + self.top_of_cache)
             return row_idx + self.top_of_cache
@@ -262,7 +261,7 @@ class DataframeColumnCache(object):
             end_of_cache_search = self.top_of_cache + len(self.row_strings) if down else self.top_of_cache
             df_sliceable = DataframeColumnSliceToStringList(self.get_src_df(), self.column_name, self.justify)
             for chunk, chunk_start_idx in search_chunk_yielder(df_sliceable, end_of_cache_search, down):
-                chunk_idx = search_list_for_str(chunk, search_string, 0 if down else len(chunk) - 1, down)
+                chunk_idx = search_list_for_str(chunk, search_string, 0 if down else len(chunk) - 1, down, case_insensitive)
                 if chunk_idx != None:
                     actual_idx = chunk_idx + chunk_start_idx
                     print('found', search_string, 'at chunk idx', chunk_idx, 'in chunk starting at', chunk_start_idx,
@@ -273,12 +272,14 @@ class DataframeColumnCache(object):
             return None
 
 
-def search_list_for_str(lst, search_string, starting_item, down=True):
+def search_list_for_str(lst, search_string, starting_item, down, case_insensitive):
     """returns index into list representing string found, or None if not found"""
+    search_string = search_string.lower() if case_insensitive else search_string
     search_slice_end = len(lst) if down else 0
     search_list = lst[starting_item:] if down else reversed(lst[:starting_item+1])
     print('searching list of size', len(lst), 'down' if down else 'up', 'from', starting_item, 'to', search_slice_end, 'for:', search_string)
     for idx, s in enumerate(search_list):
+        s = s.lower() if case_insensitive else s
         if s.find(search_string) != -1:
             print('found! ', s, 'at', idx, 'starting from', starting_item, 'in list of len', len(lst), 'down?', down)
             return starting_item + idx if down else starting_item - idx
@@ -349,11 +350,12 @@ class DataframeView(object):
     def justify(self, column_name):
         return self._column_cache[column_name].justify
 
-    def search(self, column_name, search_string, down=True, skip_current=False):
+    def search(self, column_name, search_string, down=True, skip_current=False, case_insensitive=False):
         """search downward or upward in the current column for a string match.
         Can exclude the current row in order to search 'farther' in the dataframe."""
+        case_insensitive = case_insensitive if case_insensitive != None else search_string.islower()
         starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
-        df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down)
+        df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down, case_insensitive)
         if df_index != None:
             self.scroll_rows(df_index - self._selected_row)
             return True

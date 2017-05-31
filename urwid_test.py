@@ -236,7 +236,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
     def hide_current_col(self):
         return self.df_browser.hide_col_by_index(self.urwid_cols.focus_position)
 
-    # all browsing commands
+    # BROWSE COMMANDS
     def keypress(self, size, key):
         if key in '1234567890':
             # directly select the column #
