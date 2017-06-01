@@ -46,15 +46,24 @@ def shift_list_item(lst, idx, to_right):
 # and helps provide a basic API for how a dataframe can be viewed.
 # TODO provide separate callbacks for when the dataframe itself has changed
 # vs when the column order/set has changed.
-class DFBrowser(object):
-    def __init__(self, smart_merger=None):
-        self.df = None
-        self.display_cols = list()
-        self.df_hist = list()
-        self.display_cols_hist = list()
+class DataframeBrowser(object):
+    def __init__(self, df):
+        self.df_hist = [df]
+        self.browse_columns_history = [list(df.columns)]
         self.undo_hist = list()
-        self.smerge = smart_merger
         self.change_cbs = list()
+        self.view = DataframeView(lambda: self.df)
+        self.add_change_callback(self.view.df_changed)
+
+    @property
+    def df(self):
+        return self.df_hist[-1]
+    @property
+    def browse_columns(self):
+        return self.browse_columns_history[-1]
+    @property
+    def original_df(self):
+        return self.df_hist[0]
 
     def __len__(self):
         return len(self.df)
@@ -63,78 +72,66 @@ class DFBrowser(object):
         for cb in self.change_cbs:
             cb(self)
 
-    def sort_columns(self, columns, ascending=True, algorithm='mergesort'): # we use mergesort to stay stable
-        sorted_df = self.df.sort_values(columns, ascending=ascending, kind=algorithm)
+    def sort_on_columns(self, columns, ascending=True, algorithm='mergesort', na_position=None): # we default to mergesort to stay stable
+        na_position = na_position if na_position != None else ('last' if ascending else 'first')
+        sorted_df = self.df.sort_values(columns, ascending=ascending, kind=algorithm, na_position=na_position)
         self._change_df(self.df, sorted_df)
 
-    def merge_df(self, new_df):
-        if self.df is None:
-            self.df = new_df
-            self.display_cols = list(new_df)
-            self._msg_cbs()
-            return True
-        # do merge
-        if self.smerge is not None:
-            try:
-                merged_df = self.smerge(self.df, new_df)
-                return self._change_df(self.df, merged_df)
-            except:
-                pass
-        return False
-
+    # TODO shouldn't this technically be by name?
     def shift_column(self, col_idx, num_cols_to_right):
-        new_dcols = shift_list_item(self.display_cols, col_idx, num_cols_to_right)
-        return self._change_display_cols(self.display_cols, new_dcols)
+        new_dcols = shift_list_item(self.browse_columns, col_idx, num_cols_to_right)
+        return self._change_display_cols(self.browse_columns, new_dcols)
 
     def _change_display_cols(self, old_cols, new_cols):
         if old_cols != new_cols:
-            self.display_cols_hist.append(old_cols)
-            self.undo_hist.append(self.display_cols_hist)
-            self.display_cols = new_cols
+            print('changing display cols')
+            self.browse_columns_history.append(new_cols)
+            self.undo_hist.append(self.browse_columns_history)
             self._msg_cbs()
             return True
         return False
 
     def _change_df(self, old_df, new_df):
-        self.df_hist.append(old_df)
+        self.df_hist.append(new_df)
         self.undo_hist.append(self.df_hist)
-        self.df = new_df
         self._msg_cbs()
 
+    # TODO rename to insert_column
     def add_col(self, col_name, index):
         if col_name in list(self.df):
-            new_dcols = add_column(self.display_cols, col_name, index)
-            return self._change_display_cols(self.display_cols, new_dcols)
+            new_dcols = add_column(self.browse_columns, col_name, index)
+            return self._change_display_cols(self.browse_columns, new_dcols)
         return False
 
     def hide_col_by_name(self, col_name):
-        new_cols = find_and_remove_list_item(self.display_cols, col_name)
-        return self._change_display_cols(self.display_cols, new_dcols)
+        new_cols = find_and_remove_list_item(self.browse_columns, col_name)
+        return self._change_display_cols(self.browse_columns, new_dcols)
 
     def hide_col_by_index(self, index):
-        new_cols = remove_list_index(self.display_cols, index)
-        return self._change_display_cols(self.display_cols, new_cols)
+        new_cols = remove_list_index(self.browse_columns, index)
+        return self._change_display_cols(self.browse_columns, new_cols)
 
     def undo(self, n=1):
         while n > 0 and len(self.undo_hist) > 0:
             change_type = self.undo_hist.pop()
             if change_type == self.df_hist:
-                print('attempting to undo df change')
-                self.df = self.df_hist.pop()
-            elif change_type == self.display_cols_hist:
-                self.display_cols = self.display_cols_hist.pop()
+                self.df_hist.pop()
+            elif change_type == self.browse_columns_history:
+                self.browse_columns_history.pop()
             else:
                 print('cannot undo this unknown operation')
                 break
             n -= 1
+        assert len(self.df_hist) > 0
+        assert len(self.browse_columns_history) > 0
         self._msg_cbs()
+
+    def search_column(self, column, search_string, down=True, skip_current=False):
+        """This is delegated to the view because it maintains a convenient string cache."""
+        return self.view.search(column, search_string, down, skip_current)
 
     # TODO add redo functionality, to undo an undo.
     # would only allow redos immediately after undos.
-
-    @property
-    def columns(self):
-        return self.display_cols
 
     def add_change_callback(self, cb):
         if cb not in self.change_cbs:
@@ -145,38 +142,104 @@ class DFBrowser(object):
         return self._change_df(self.df, new_df)
 
 
-class DataframeColumnSliceToStringList(object):
-    def __init__(self, df, column, justify):
-        self.df = df
-        self.column = column
-        self.justify = justify
-    def __getitem__(self, val):
-        return self.df.iloc[val].to_string(index=False, index_names=False, header=False,
-                                           columns=[self.column], justify=self.justify).split('\n')
-    def __len__(self):
-        return len(self.df)
+class dfcol_defaultdict(defaultdict):
+    def __init__(self, get_df):
+        self.get_df = get_df
+    def __missing__(self, column_name):
+        assert column_name != None
+        cc = DataframeColumnCache(lambda : self.get_df(), column_name)
+        self[column_name] = cc
+        return cc
 
-# chunk search utils
-def not_at_end(lengthable, position, down):
-    return position < len(lengthable) if down else position > 0
+# Note that DataframeBrowser (i.e. history) is responsible for the columns of the dataframe and the dataframe itself
+# whereas this class is responsible for the view into the rows.
+# This decision is based on the fact that scrolling up and down through a dataset
+# is not considered to be a useful 'undo' operation, since it is immediately reversible,
+# whereas column operations (re-order, hide, etc) are reversible with extra work (they require typing column names)
+# A counterpoint to this is 'jumping' through the rows - some users might find it handy to be able
+# to return to their previous row position after a jump. But as of now, it's hard to see
+# what the right way of handling that would be.
+# searches happen here, because we are simply iterating through the strings
+# for the next match.
+# sorts, filters, etc. also happen here, because they modify the dataframe and therefore
+# require re-computation of the viewing strings. This eventually could change
+# if the individual column views could register for callbacks during dataframe changes.
+# The history object can be responsible for maintaining the history
+# of dataframes and column hides/shifts
+class DataframeView(object):
+    #TODO maybe rename this to DataframeRowWindowRenderer
+    DEFAULT_VIEW_HEIGHT = 100
+    def __init__(self, get_df, normal_cache_size=200, cache_above_top=50):
+        self._get_df = get_df
+        self._top_row = 0 # the top row in the dataframe that's in view
+        self._selected_row = 0
+        self._view_height = DataframeView.DEFAULT_VIEW_HEIGHT
+        self._column_cache = dfcol_defaultdict(lambda: self.df)
+        self.scroll_margin_up = 10 # TODO these are very arbitrary and honestly it might be better
+        self.scroll_margin_down = 30 # if they didn't exist inside this class at all.
+        # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
+        # from which the search should begin.
 
-def get_next_chunk(sliceable, start_position, chunk_size, down):
-    """includes start_position, of size chunk_size"""
-    if not down:
-        chunk_beg = max(0, start_position - chunk_size + 1)
-        print('yielding chunk upwards from ', chunk_beg, 'to', start_position + 1)
-        return sliceable[chunk_beg:start_position + 1], chunk_beg
-    else:
-        chunk_end = min(len(sliceable), start_position+chunk_size)
-        print('yielding chunk downwards from', start_position, 'to', chunk_end)
-        return sliceable[start_position:chunk_end], start_position
+    # TODO : jump to column, insert column at point, filter/where
 
-def search_chunk_yielder(sliceable, start_location, down=True, chunk_size=100):
-    start_of_next_chunk = start_location
-    while not_at_end(sliceable, start_of_next_chunk, down):
-        yield get_next_chunk(sliceable, start_of_next_chunk, chunk_size, down)
-        start_of_next_chunk = start_of_next_chunk + chunk_size if down else start_of_next_chunk - chunk_size
-    raise StopIteration
+    @property
+    def df(self):
+        return self._get_df()
+    @property
+    def top_row(self):
+        return self._top_row
+    @property
+    def selected_relative(self):
+        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
+        return self._selected_row - self._top_row
+
+    def header(self, column_name):
+        return self._column_cache[column_name].header
+    def width(self, column_name):
+        return self._column_cache[column_name].width
+    def lines(self, column_name, top_row=None, bottom_row=None):
+        top_row = top_row if top_row != None else self._top_row
+        bottom_row = bottom_row if bottom_row != None else min(top_row + self._view_height, len(self.df))
+        return self._column_cache[column_name].rows(top_row, bottom_row)
+    def selected_row_content(self, column_name):
+        return self.df.ix[self._selected_row,column_name]
+    def change_column_width(self, column_name, n):
+        self._column_cache[column_name].change_width(n)
+    def justify(self, column_name):
+        return self._column_cache[column_name].justify
+
+    # TODO possibly implement a wrapper on the dataframebrowser that calls this?
+    def search(self, column_name, search_string, down=True, skip_current=False, case_insensitive=False):
+        """search downward or upward in the current column for a string match.
+        Can exclude the current row in order to search 'farther' in the dataframe."""
+        case_insensitive = case_insensitive if case_insensitive != None else search_string.islower()
+        starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
+        df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down, case_insensitive)
+        if df_index != None:
+            self.scroll_rows(df_index - self._selected_row)
+            return True
+        return False
+
+    def jump(self, fraction=None, pos=None):
+        if fraction != None:
+            assert fraction >= 0.0 and fraction <= 1.0
+            pos = fraction * len(self.df)
+        self.scroll_rows(pos - self._selected_row)
+
+    def scroll_rows(self, n):
+        """ positive numbers are scroll down; negative are scroll up"""
+        self._selected_row = max(0, min(self._selected_row + n, len(self.df) - 1))
+        if n > 0:
+            while self._selected_row > self._top_row + self.scroll_margin_down:
+                self._top_row += 1 # TODO this could be faster
+        elif n < 0:
+            while self._selected_row < self._top_row + self.scroll_margin_up and self._top_row > 0:
+                self._top_row -= 1
+        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
+
+    def df_changed(self, browser=None):
+        for col_name, cache in self._column_cache.items():
+            cache.clear_cache()
 
 
 # TODO allow this class to register directly with the dataframe owner
@@ -276,6 +339,41 @@ class DataframeColumnCache(object):
             return None
 
 
+# chunk search utils
+class DataframeColumnSliceToStringList(object):
+    def __init__(self, df, column, justify):
+        self.df = df
+        self.column = column
+        self.justify = justify
+    def __getitem__(self, val):
+        return self.df.iloc[val].to_string(index=False, index_names=False, header=False,
+                                           columns=[self.column], justify=self.justify).split('\n')
+    def __len__(self):
+        return len(self.df)
+
+
+def not_at_end(lengthable, position, down):
+    return position < len(lengthable) if down else position > 0
+
+def get_next_chunk(sliceable, start_position, chunk_size, down):
+    """includes start_position, of size chunk_size"""
+    if not down:
+        chunk_beg = max(0, start_position - chunk_size + 1)
+        print('yielding chunk upwards from ', chunk_beg, 'to', start_position + 1)
+        return sliceable[chunk_beg:start_position + 1], chunk_beg
+    else:
+        chunk_end = min(len(sliceable), start_position+chunk_size)
+        print('yielding chunk downwards from', start_position, 'to', chunk_end)
+        return sliceable[start_position:chunk_end], start_position
+
+def search_chunk_yielder(sliceable, start_location, down=True, chunk_size=100):
+    start_of_next_chunk = start_location
+    while not_at_end(sliceable, start_of_next_chunk, down):
+        yield get_next_chunk(sliceable, start_of_next_chunk, chunk_size, down)
+        start_of_next_chunk = start_of_next_chunk + chunk_size if down else start_of_next_chunk - chunk_size
+    raise StopIteration
+
+
 def search_list_for_str(lst, search_string, starting_item, down, case_insensitive):
     """returns index into list representing string found, or None if not found"""
     search_string = search_string.lower() if case_insensitive else search_string
@@ -288,112 +386,3 @@ def search_list_for_str(lst, search_string, starting_item, down, case_insensitiv
             print('found! ', s, 'at', idx, 'starting from', starting_item, 'in list of len', len(lst), 'down?', down)
             return starting_item + idx if down else starting_item - idx
     return None
-
-class dfcol_defaultdict(defaultdict):
-    def __init__(self, get_df):
-        self.get_df = get_df
-    def __missing__(self, column_name):
-        assert column_name != None
-        cc = DataframeColumnCache(lambda : self.get_df(), column_name)
-        self[column_name] = cc
-        return cc
-
-# Note that DataframeBrowser (i.e. history) is responsible for the columns of the dataframe and the dataframe itself
-# whereas this class is responsible for the view into the rows.
-# This decision is based on the fact that scrolling up and down through a dataset
-# is not considered to be a useful 'undo' operation, since it is immediately reversible,
-# whereas column operations (re-order, hide, etc) are reversible with extra work (they require typing column names)
-# A counterpoint to this is 'jumping' through the rows - some users might find it handy to be able
-# to return to their previous row position after a jump. But as of now, it's hard to see
-# what the right way of handling that would be.
-# searches happen here, because we are simply iterating through the strings
-# for the next match.
-# sorts, filters, etc. also happen here, because they modify the dataframe and therefore
-# require re-computation of the viewing strings. This eventually could change
-# if the individual column views could register for callbacks during dataframe changes.
-# The history object can be responsible for maintaining the history
-# of dataframes and column hides/shifts
-class DataframeView(object):
-    DEFAULT_VIEW_HEIGHT = 100
-    def __init__(self, df_history, normal_cache_size=200, cache_above_top=50):
-        self.df_history = df_history
-        self._top_row = 0 # the top row in the dataframe that's in view
-        self._selected_row = 0
-        self._view_height = DataframeView.DEFAULT_VIEW_HEIGHT
-        self._column_cache = dfcol_defaultdict(lambda: self.df)
-        self.scroll_margin_up = 10 # TODO these are very arbitrary and honestly it might be better
-        self.scroll_margin_down = 30 # if they didn't exist inside this class at all.
-        # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
-        # from which the search should begin.
-
-    # TODO : jump to column, insert column at point, filter/where
-
-    @property
-    def df(self):
-        return self.df_history.df
-    @property
-    def top_row(self):
-        return self._top_row
-    @property
-    def selected_relative(self):
-        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
-        return self._selected_row - self._top_row
-
-    def header(self, column_name):
-        return self._column_cache[column_name].header
-    def width(self, column_name):
-        return self._column_cache[column_name].width
-    def lines(self, column_name, top_row=None, bottom_row=None):
-        top_row = top_row if top_row != None else self._top_row
-        bottom_row = bottom_row if bottom_row != None else min(top_row + self._view_height, len(self.df))
-        return self._column_cache[column_name].rows(top_row, bottom_row)
-    def selected_row_content(self, column_name):
-        return self.df.ix[self._selected_row,column_name]
-    def change_column_width(self, column_name, n):
-        self._column_cache[column_name].change_width(n)
-    def justify(self, column_name):
-        return self._column_cache[column_name].justify
-
-    def search(self, column_name, search_string, down=True, skip_current=False, case_insensitive=False):
-        """search downward or upward in the current column for a string match.
-        Can exclude the current row in order to search 'farther' in the dataframe."""
-        case_insensitive = case_insensitive if case_insensitive != None else search_string.islower()
-        starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
-        df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down, case_insensitive)
-        if df_index != None:
-            self.scroll_rows(df_index - self._selected_row)
-            return True
-        return False
-
-    def jump(self, fraction=None, pos=None):
-        if fraction != None:
-            assert fraction >= 0.0 and fraction <= 1.0
-            pos = fraction * len(self.df)
-        self.scroll_rows(pos - self._selected_row)
-
-    def scroll_rows(self, n):
-        """ positive numbers are scroll down; negative are scroll up"""
-        self._selected_row = max(0, min(self._selected_row + n, len(self.df) - 1))
-        if n > 0:
-            while self._selected_row > self._top_row + self.scroll_margin_down:
-                self._top_row += 1 # TODO this could be faster
-        elif n < 0:
-            while self._selected_row < self._top_row + self.scroll_margin_up and self._top_row > 0:
-                self._top_row -= 1
-        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
-
-    def _clear_cache(self):
-        for col_name, cache in self._column_cache.items():
-            cache.clear_cache()
-
-    def sort(self, column_names, ascending=True):
-        self._clear_cache()
-        self.df_history.sort_columns(column_names, ascending)
-
-    def undo(self, n=1):
-        self._clear_cache()
-        self.df_history.undo(n)
-
-    def query(self, query_string):
-        self._clear_cache()
-        self.df_history.query(query_string)
