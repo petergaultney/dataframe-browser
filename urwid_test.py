@@ -6,7 +6,7 @@ import pandas as pd
 from dataframe_browser import DataframeBrowser
 from keybindings import keybs
 
-from _debug import *
+from gui_debug import *
 
 PAGE_SIZE = 20
 
@@ -241,14 +241,14 @@ class UrwidColumnView(urwid.WidgetWrap):
     def is_focus_column(self, column_name):
         return column_name == self.focus_column
 
-    def translate_urwid_colrow_to_browser_colrow(self, ucol, urow):
-        col = 0
-        next_col_start = self.browser.view.width(self.browser.browse_columns[col])
-        while ucol > next_col_start:
-            col += 1
-            next_col_start += self.browser.view.width(self.browser.browse_columns[col]) + 1
-        self.set_col_focus(col)
-        print(col, self.browser.browse_columns[col])
+    # def translate_urwid_colrow_to_browser_colrow(self, ucol, urow):
+    #     col = 0
+    #     next_col_start = self.browser.view.width(self.browser.browse_columns[col])
+    #     while ucol > next_col_start:
+    #         col += 1
+    #         next_col_start += self.browser.view.width(self.browser.browse_columns[col]) + 1
+    #     self.set_col_focus(col)
+    #     print(col, self.browser.browse_columns[col])
 
     # TODO break this into two functions - an 'add new' and a 'switch'
     # TODO this part of the code shouldn't know about Dataframes at all. remove all the actual switching logic into a separate class.
@@ -299,6 +299,11 @@ class UrwidColumnView(urwid.WidgetWrap):
     def scroll(self, num_rows):
         self.browser.view.scroll_rows(num_rows)
         self.update_view()
+
+    # def mouse_event(self, size, event, button, col, row, focus):
+    #     print(size, focus)
+    #     print(self.urwid_cols.column_widths(size))
+    #     print(self.urwid_cols.get_cursor_coords(size))
 
     def set_col_focus(self, col_num):
         # the only function allowed to deal directly with urwid_cols.focus_position

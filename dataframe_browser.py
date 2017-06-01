@@ -1,47 +1,11 @@
 from collections import defaultdict
 import pandas as pd
 import numpy as np
-from smartmerge import DataframeSmartMerger
 
-from _debug import *
+from list_utils import *
+from chunk_search_utils import *
 
-def insert_column(columns, col_name, index):
-    if col_name in columns and columns[index] == col_name:
-        return columns # done. no new list, b/c no change happened.
-    new_cols = columns[:] # make new list, b/c we're making a change
-    if col_name in columns:
-        print(columns)
-        cur_idx = new_cols.index(col_name)
-        new_cols.insert(index, new_cols.pop(cur_idx))
-        print(new_cols)
-    else:
-        new_cols.insert(index, col_name)
-    return new_cols
-
-def find_and_remove_list_item(lst, item):
-    try:
-        return remove_list_index(lst, lst.index(item))
-    except:
-        return lst
-
-def remove_list_index(lst, index):
-    try:
-        new_lst = lst[:]
-        del new_lst[index]
-        return new_lst
-    except:
-        return lst
-
-def shift_list_item(lst, idx, to_right):
-    if idx < len(lst) and idx >= 0:
-        new_idx = idx + to_right
-        if new_idx < len(lst) and new_idx >= 0 and idx != new_idx:
-            item = lst[idx]
-            new_lst = lst[:]
-            del new_lst[idx]
-            new_lst.insert(new_idx, item)
-            return new_lst
-    return lst # no change
+from gui_debug import *
 
 # the DFBrowser basically maintains an undo history
 # and helps provide a basic API for how a dataframe can be viewed.
@@ -102,7 +66,7 @@ class DataframeBrowser(object):
 
     def insert_column(self, col_name, index):
         if col_name in list(self.df):
-            new_dcols = insert_column(self.browse_columns, col_name, index)
+            new_dcols = insert_item_if_not_present(self.browse_columns, col_name, index)
             return self._change_display_cols(self.browse_columns, new_dcols)
         return False
 
@@ -348,40 +312,3 @@ class DataframeColumnSliceToStringList(object):
                                            columns=[self.column], justify=self.justify).split('\n')
     def __len__(self):
         return len(self.df)
-
-# chunk search utils
-# TODO move all or most of this into a utility functions class
-def not_at_end(lengthable, position, down):
-    return position < len(lengthable) if down else position > 0
-
-def get_next_chunk(sliceable, start_position, chunk_size, down):
-    """includes start_position, of size chunk_size"""
-    if not down:
-        chunk_beg = max(0, start_position - chunk_size + 1)
-        print('yielding chunk upwards from ', chunk_beg, 'to', start_position + 1)
-        return sliceable[chunk_beg:start_position + 1], chunk_beg
-    else:
-        chunk_end = min(len(sliceable), start_position+chunk_size)
-        print('yielding chunk downwards from', start_position, 'to', chunk_end)
-        return sliceable[start_position:chunk_end], start_position
-
-def search_chunk_yielder(sliceable, start_location, down=True, chunk_size=100):
-    start_of_next_chunk = start_location
-    while not_at_end(sliceable, start_of_next_chunk, down):
-        yield get_next_chunk(sliceable, start_of_next_chunk, chunk_size, down)
-        start_of_next_chunk = start_of_next_chunk + chunk_size if down else start_of_next_chunk - chunk_size
-    raise StopIteration
-
-
-def search_list_for_str(lst, search_string, starting_item, down, case_insensitive):
-    """returns index into list representing string found, or None if not found"""
-    search_string = search_string.lower() if case_insensitive else search_string
-    search_slice_end = len(lst) if down else 0
-    search_list = lst[starting_item:] if down else reversed(lst[:starting_item+1])
-    print('searching list of size', len(lst), 'down' if down else 'up', 'from', starting_item, 'to', search_slice_end, 'for:', search_string)
-    for idx, s in enumerate(search_list):
-        s = s.lower() if case_insensitive else s
-        if s.find(search_string) != -1:
-            print('found! ', s, 'at', idx, 'starting from', starting_item, 'in list of len', len(lst), 'down?', down)
-            return starting_item + idx if down else starting_item - idx
-    return None
