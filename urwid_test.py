@@ -20,14 +20,16 @@ def _pack(columns): # this just exists to cut down code bloat
 def _given(columns, width):
     return columns.options('given', width)
 
-def display_browser_in_urwid_columns(urwid_cols, browser, focus_col):
+def display_browser_in_urwid_columns(urwid_cols, browser, focus_col, is_focus_col,
+                                     set_focus_column_by_name):
     # end('kp to kp') # DEBUG
     # st() # DEBUG
     # st() # DEBUG
     del urwid_cols.contents[:]
 
     for idx, col_name in enumerate(browser.browse_columns):
-        pile = create_column_pile(urwid_cols, browser.view, col_name, idx == focus_col)
+        pile = BrowserNamedColumnPile(browser.view, col_name, is_focus_col,
+                                      set_focus_column_by_name)
         column_width = browser.view.width(col_name)
         urwid_cols.contents.append((pile, _given(urwid_cols, column_width)))
     try:
@@ -36,36 +38,67 @@ def display_browser_in_urwid_columns(urwid_cols, browser, focus_col):
         print('exception in display_browser_in_urwid_columns', e)
     # end('col')
 
-def create_column_pile(urwid_cols, view, col_name, is_focus_col):
-    col_disp_attr = 'def' if not is_focus_col else 'active_col'
-    selected_row_attr = 'active_element' if is_focus_col else 'active_row'
-    selected_row = view.selected_relative
-    column_header = view.header(col_name)
+def generate_strings_segments_for_column(view, col_name, is_focus_col):
     column_strings = view.lines(col_name)
-    align = view.justify(col_name)
-    part_one = column_header
-    part_one += '\n...\n' if view.top_row > 1 and is_focus_col else '\n\n'
-    part_one += '\n'.join(column_strings[0:selected_row])
-    part_two =  '\n'.join(column_strings[selected_row + 1: len(column_strings)])
-    return create_column_from_text_and_attrib(part_one, column_strings[selected_row], part_two,
-                                              col_disp_attr, selected_row_attr, align)
+    selected_row = view.selected_relative
+    pile_of_strs = list()
+    pile_of_strs.append(view.header(col_name) +
+                        '\n...' if view.top_row > 1 and is_focus_col else '\n')
+    if selected_row > 0:
+        pile_of_strs.append('\n'.join(column_strings[0:selected_row]))
+    pile_of_strs.append(column_strings[selected_row])
+    pile_of_strs.append('\n'.join(column_strings[selected_row + 1: len(column_strings)]))
+    return pile_of_strs
 
+def set_attrib_on_col_pile(pile, is_focus_col, focus_pile):
+    for i in range(len(pile.contents)):
+        if focus_pile == i:
+            pile.contents[i][0].set_attr_map({None: 'active_element' if is_focus_col else 'active_row'})
+        else:
+            pile.contents[i][0].set_attr_map({None: 'active_col' if is_focus_col else 'def'})
 
-def create_column_from_text_and_attrib(part_one, selected_row_text, part_two, col_attrib,
-                                       selected_row_attrib, align):
-    pile = urwid.Pile([])
-    pile.contents.append((urwid.AttrMap(SelectableText(part_one, align=align), col_attrib), ('pack', None)))
-    pile.contents.append((urwid.AttrMap(SelectableText(selected_row_text, align=align), selected_row_attrib), ('pack', None)))
-    pile.contents.append((urwid.AttrMap(SelectableText(part_two, align=align), col_attrib), ('pack', None)))
-    pile.focus_position = 1
-    return pile
-
-
-def set_attrib_on_col_pile(pile, is_focus_col):
-    pile.contents[0][0].set_attr_map({None: 'active_col' if is_focus_col else 'def'})
-    pile.contents[1][0].set_attr_map({None: 'active_element' if is_focus_col else 'active_row'})
-    pile.contents[2][0].set_attr_map({None: 'active_col' if is_focus_col else 'def'})
-
+class BrowserNamedColumnPile(urwid.Pile):
+    def __init__(self, browser_view, column_name, is_focus_col_cb, set_focus_cb):
+        super().__init__([])
+        self.browser_view = browser_view
+        self.column_name = column_name
+        self.is_focus_col = is_focus_col_cb
+        self.set_focus_to_column = set_focus_cb
+        self._focus_pile = 0
+        self._create_pile()
+        self.rebuild_from_view()
+    def _create_pile(self, num_texts=5):
+        for i in range(num_texts):
+            self.contents.append((urwid.AttrMap(
+                SelectableText('', align=self.browser_view.justify(self.column_name)), 'def'),
+                                  ('pack', None)))
+    @property
+    def is_focused(self):
+        return self.is_focus_col(self.column_name)
+    def selectable(self):
+        return True
+    def mouse_event(self, size, event, button, col, row, focus):
+        print('srp got mouse event', size, event, button, col, row, focus, self.column_name)
+        if event == 'mouse press':
+            self.set_focus_to_column(self.column_name, max(row-2, 0))
+        return True
+    def keypress(self, size, key):
+        return False # we don't handle these
+    def rebuild_from_view(self):
+        pile_strings = generate_strings_segments_for_column(
+            self.browser_view, self.column_name, self.is_focused)
+        for idx, pile_str in enumerate(pile_strings):
+            self.contents[idx][0].original_widget.set_text(pile_str)
+        self._focus_pile = len(pile_strings) - 2
+        self.reset_attribs()
+    def _set_header_break(self):
+        header = self.browser_view.header(self.column_name)
+        # header += '\n...' if view.top_row > 1 and is_focus_col else '\n'
+        header += '\n...' if self.is_focused and self.browser_view.top_row > 1 else '\n'
+        self.contents[0][0].original_widget.set_text(header)
+    def reset_attribs(self):
+        self._set_header_break()
+        set_attrib_on_col_pile(self, self.is_focused, self._focus_pile)
 
 class Modeline(urwid.WidgetWrap):
     def __init__(self):
@@ -163,7 +196,7 @@ class Minibuffer(urwid.WidgetWrap):
                     print('asking for backward search')
                     self._search(self.edit_text.get_edit_text(), False, False)
 
-
+# TODO are we actually using this?
 class SelectableText(urwid.Text):
     def __init__(self, text, align='right', wrap='clip', layout=None):
         # txt = text.strip()
@@ -176,7 +209,9 @@ class SelectableText(urwid.Text):
         return True # this allows us to assign focus to the columns of text
     # def keypress(self, size, key):
     #     return None
-
+    def mouse_event(self, size, event, button, col, row, focus):
+        print('text got mevent')
+        return False
 
 class UrwidColumnView(urwid.WidgetWrap):
     def __init__(self, urwid_frame):
@@ -192,16 +227,28 @@ class UrwidColumnView(urwid.WidgetWrap):
     def browser(self):
         return self.browsers[self.active_browser_name]
     @property
-    def focus_col(self):
+    def focus_column(self):
         return self._col_by_index(self.focus_pos)
     @property
     def focus_pos(self):
-        try:
-            return self.urwid_cols.focus_position
-        except:
-            return self.last_focused_column[self.active_browser_name]
+        return self.last_focused_column[self.active_browser_name]
     def _col_by_index(self, idx):
         return self.browser.browse_columns[idx]
+    def _col_idx_by_name(self, column_name):
+        for idx, colname in enumerate(self.browser.browse_columns):
+            if colname == column_name:
+                return idx
+    def is_focus_column(self, column_name):
+        return column_name == self.focus_column
+
+    def translate_urwid_colrow_to_browser_colrow(self, ucol, urow):
+        col = 0
+        next_col_start = self.browser.view.width(self.browser.browse_columns[col])
+        while ucol > next_col_start:
+            col += 1
+            next_col_start += self.browser.view.width(self.browser.browse_columns[col]) + 1
+        self.set_col_focus(col)
+        print(col, self.browser.browse_columns[col])
 
     # TODO break this into two functions - an 'add new' and a 'switch'
     # TODO this part of the code shouldn't know about Dataframes at all. remove all the actual switching logic into a separate class.
@@ -232,12 +279,18 @@ class UrwidColumnView(urwid.WidgetWrap):
             self.active_browser_name = new_name
 
     def update_view(self, browser=None):
-        try:
-            print('updating view')
-            display_browser_in_urwid_columns(self.urwid_cols, self.browser, self.focus_pos)
+        print('updating view')
+        if len(self.browser.browse_columns) > 0:
+            display_browser_in_urwid_columns(self.urwid_cols, self.browser,
+                                             self.focus_pos, self.is_focus_column,
+                                             self.set_focus_to_column_by_name)
             self.update_text()
-        except Exception as e:
-            print('exception in update view', e)
+
+    def set_focus_to_column_by_name(self, column_name, row):
+        print('trying to set focus to column', column_name)
+        self.set_col_focus(self._col_idx_by_name(column_name))
+        if row != self.browser.view.selected_relative:
+            self.scroll(row - self.browser.view.selected_relative)
 
     def update_text(self):
         self.urwid_frame.modeline.set_text(str(self.browser.view.selected_row_content(
@@ -247,23 +300,27 @@ class UrwidColumnView(urwid.WidgetWrap):
         self.browser.view.scroll_rows(num_rows)
         self.update_view()
 
-    def set_focus(self, col_num):
+    def set_col_focus(self, col_num):
+        # the only function allowed to deal directly with urwid_cols.focus_position
         col_num = max(0, min(col_num, len(self.urwid_cols.contents) - 1))
         try:
-            focus_pos = self.urwid_cols.focus_position
-            if self.urwid_cols.focus_position != col_num:
-                set_attrib_on_col_pile(self.urwid_cols.contents[focus_pos][0], False)
-                set_attrib_on_col_pile(self.urwid_cols.contents[col_num][0], True)
+            current_focus_pos = self.focus_pos #self.urwid_cols.focus_position
+            if current_focus_pos != col_num:
                 self.urwid_cols.focus_position = col_num
                 self.last_focused_column[self.active_browser_name] = col_num
+                self.urwid_cols.contents[current_focus_pos][0].reset_attribs()
+                self.urwid_cols.contents[col_num][0].reset_attribs()
+                # set_attrib_on_col_pile(self.urwid_cols.contents[current_focus_pos][0], False)
+                # set_attrib_on_col_pile(self.urwid_cols.contents[col_num][0], True)
+                # these two must always go together
                 self.update_text()
             return True
         except Exception as e:
-            print('exception in set focus' + e)
+            print('exception in set focus', e)
             return False
 
     def search_current_col(self, search_string, down=True, skip_current=False):
-        if self.browser.search_column(self.focus_col, search_string, down, skip_current):
+        if self.browser.search_column(self.focus_column, search_string, down, skip_current):
             self.update_view()
         else:
             # TODO could print help text saying the search failed.
@@ -278,32 +335,27 @@ class UrwidColumnView(urwid.WidgetWrap):
 
     def jump_to_col(self, num):
         num = num if num >= 0 else 9 # weird special case for when the input was a '0' key
-        self.set_focus(num)
+        self.set_col_focus(num)
 
     def change_column_width(self, by_n):
-        self.browser.view.change_column_width(self.focus_col, by_n)
+        self.browser.view.change_column_width(self.focus_column, by_n)
         self.urwid_cols.contents[self.focus_pos] = (self.urwid_cols.contents[self.focus_pos][0],
-                                                    _given(self.urwid_cols, self.browser.view.width(self.focus_col)))
+                                                    _given(self.urwid_cols, self.browser.view.width(self.focus_column)))
 
     def sort_current_col(self, ascending=True):
-        self.browser.sort_on_columns([self.focus_col], ascending=ascending)
-
-    def mouse_event(self, size, event, button, col, row, focus):
-        print(size, event, button, col, row, focus)
-        return None
-    # TODO make mouse events actually work? on columns they should definitely work.
+        self.browser.sort_on_columns([self.focus_column], ascending=ascending)
 
     def insert_column(self, col_name, idx=None):
         try:
             if not idx or idx < 0 or idx > self.urwid_cols.focus_position:
-                idx = self.urwid_cols.focus_position
+                idx = self.focus_pos
         except Exception as e: # if for some reason cols.focus_position doesn't exist at all...
             print('exception in insert column', e)
             idx = 0
         return self.browser.insert_column(col_name, idx)
 
     def hide_current_col(self):
-        return self.browser.hide_col_by_index(self.urwid_cols.focus_position)
+        return self.browser.hide_col_by_index(self.focus_pos)
 
     def _get_completer_with_hint(self, lst):
         return urwid_utils.ListCompleter(lst, self.urwid_frame.hint).complete
@@ -329,9 +381,9 @@ class UrwidColumnView(urwid.WidgetWrap):
             self.urwid_frame.focus_minibuffer('add', completer=self._get_completer_with_hint(
                 list(self.browser.all_columns)))
         elif key in keybs('browse right'):
-            self.set_focus(self.urwid_cols.focus_position + 1)
+            self.set_col_focus(self.focus_pos + 1)
         elif key in keybs('browse left'):
-            self.set_focus(self.urwid_cols.focus_position - 1)
+            self.set_col_focus(self.focus_pos - 1)
         elif key in keybs('browse down'):
             self.scroll(+1)
         elif key in keybs('browse up'):
@@ -341,7 +393,7 @@ class UrwidColumnView(urwid.WidgetWrap):
         elif key in keybs('quit'):
             raise urwid.ExitMainLoop()
         elif key in keybs('query'):
-            self.urwid_frame.focus_minibuffer('query', column_name=self.focus_col)
+            self.urwid_frame.focus_minibuffer('query', column_name=self.focus_column)
         elif key in keybs('page up'):
             self.scroll(-PAGE_SIZE)
         elif key in keybs('page down'):
