@@ -170,7 +170,6 @@ class dfcol_defaultdict(defaultdict):
 # The history object can be responsible for maintaining the history
 # of dataframes and column hides/shifts
 class DataframeView(object):
-    #TODO maybe rename this to DataframeRowWindowRenderer
     DEFAULT_VIEW_HEIGHT = 100
     def __init__(self, get_df, normal_cache_size=200, cache_above_top=50):
         self._get_df = get_df
@@ -183,7 +182,7 @@ class DataframeView(object):
         # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
         # from which the search should begin.
 
-    # TODO : jump to column, filter/where
+    # TODO: str.contains/match, Join
 
     @property
     def df(self):
@@ -211,7 +210,6 @@ class DataframeView(object):
     def justify(self, column_name):
         return self._column_cache[column_name].justify
 
-    # TODO possibly implement a wrapper on the dataframebrowser that calls this?
     def search(self, column_name, search_string, down=True, skip_current=False, case_insensitive=False):
         """search downward or upward in the current column for a string match.
         Can exclude the current row in order to search 'farther' in the dataframe."""
@@ -245,8 +243,6 @@ class DataframeView(object):
             cache.clear_cache()
 
 
-# TODO allow this class to register directly with the dataframe owner
-# for notification of when the backing dataframe has changed (and therefore the cache is invalid)
 class DataframeColumnCache(object):
     MIN_WIDTH = 2
     MAX_WIDTH = 50
@@ -342,7 +338,6 @@ class DataframeColumnCache(object):
             return None
 
 
-# chunk search utils
 class DataframeColumnSliceToStringList(object):
     def __init__(self, df, column, justify):
         self.df = df
@@ -354,7 +349,8 @@ class DataframeColumnSliceToStringList(object):
     def __len__(self):
         return len(self.df)
 
-
+# chunk search utils
+# TODO move all or most of this into a utility functions class
 def not_at_end(lengthable, position, down):
     return position < len(lengthable) if down else position > 0
 

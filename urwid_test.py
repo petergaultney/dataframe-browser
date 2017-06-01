@@ -66,6 +66,7 @@ def set_attrib_on_col_pile(pile, is_focus_col):
     pile.contents[1][0].set_attr_map({None: 'active_element' if is_focus_col else 'active_row'})
     pile.contents[2][0].set_attr_map({None: 'active_col' if is_focus_col else 'def'})
 
+
 class Modeline(urwid.WidgetWrap):
     def __init__(self):
         self.text = urwid.Text('Welcome to the Dataframe browser!')
@@ -79,6 +80,7 @@ class Modeline(urwid.WidgetWrap):
         self.set_text('type column name to add, then press enter. Press Esc to return to browsing.')
     def keypress(self, size, key):
         raise urwid.ExitMainLoop('somehow put focus on help text!')
+
 
 class Minibuffer(urwid.WidgetWrap):
     def __init__(self, urwid_browser):
@@ -201,6 +203,8 @@ class UrwidColumnView(urwid.WidgetWrap):
     def _col_by_index(self, idx):
         return self.browser.browse_columns[idx]
 
+    # TODO break this into two functions - an 'add new' and a 'switch'
+    # TODO this part of the code shouldn't know about Dataframes at all. remove all the actual switching logic into a separate class.
     def switch_to_browser(self, df, name=None):
         """Open an existing dataframe, or accept a new one."""
         print('switching to', name)
@@ -238,14 +242,6 @@ class UrwidColumnView(urwid.WidgetWrap):
     def update_text(self):
         self.urwid_frame.modeline.set_text(str(self.browser.view.selected_row_content(
             self.browser.browse_columns[self.urwid_cols.focus_position])))
-    # # TODO move everything having to do with focus position and 'view'
-    # # out of this class and into either the class containing the undo history,
-    # # or into another class that would wrap that class.
-    # # The question is basically, is keeping track of which columns are hidden
-    # # and the dataframe history itself strongly related to what is currently being
-    # # viewed in a limited window?
-    # # Either way, this class should simply provide an extension of that code
-    # # into the Urwid world, and should not itself keep track of any state.
 
     def scroll(self, num_rows):
         self.browser.view.scroll_rows(num_rows)
@@ -291,9 +287,11 @@ class UrwidColumnView(urwid.WidgetWrap):
 
     def sort_current_col(self, ascending=True):
         self.browser.sort_on_columns([self.focus_col], ascending=ascending)
-    # def mouse_event(self, size, event, button, col, row, focus):
-    #     return None
-    # TODO verify that this works...
+
+    def mouse_event(self, size, event, button, col, row, focus):
+        print(size, event, button, col, row, focus)
+        return None
+    # TODO make mouse events actually work? on columns they should definitely work.
 
     def insert_column(self, col_name, idx=None):
         try:
