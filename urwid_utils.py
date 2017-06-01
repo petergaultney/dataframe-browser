@@ -12,7 +12,7 @@ class AdvancedEdit(urwid.Edit):
               - C-w: remove the word on the back
     """
 
-    def setCompletionMethod(self, callback):
+    def setCompletionMethod(self, callback=None):
         """Define method called when completion is asked
         @callback: method with 2 arguments:
                     - the text to complete
@@ -76,7 +76,7 @@ class ListCompleter:
         options = [word if word.startswith(prefix) else '' for word in self.words]
         self.hint('options: ' + ' '.join(str(t) + ' ' for t in options))
 
-        for idx in range(start_idx, len(self.words)) + range(0, start_idx):
+        for idx in list(range(start_idx, len(self.words))) + list(range(0, start_idx)):
             if self.words[idx].lower().startswith(prefix):
                 completion_data['last'] = self.words[idx]
                 return self.words[idx]

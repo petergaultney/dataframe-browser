@@ -20,35 +20,31 @@ def _pack(columns): # this just exists to cut down code bloat
 def _given(columns, width):
     return columns.options('given', width)
 
-def display_df_in_urwid_columns(urwid_cols, df_browser):
+def display_browser_in_urwid_columns(urwid_cols, browser, focus_col):
     # end('kp to kp') # DEBUG
     # st() # DEBUG
     # st() # DEBUG
-    try:
-        focus_col = urwid_cols.focus_position
-    except:
-        focus_col = 0
     del urwid_cols.contents[:]
 
-    for idx, col_name in enumerate(df_browser.browse_columns):
-        pile = create_column_pile(urwid_cols, df_browser.view, col_name, idx == focus_col)
-        column_width = df_browser.view.width(col_name)
+    for idx, col_name in enumerate(browser.browse_columns):
+        pile = create_column_pile(urwid_cols, browser.view, col_name, idx == focus_col)
+        column_width = browser.view.width(col_name)
         urwid_cols.contents.append((pile, _given(urwid_cols, column_width)))
     try:
         urwid_cols.focus_position = focus_col
     except Exception as e:
-        hint(str(e))
-    # end('df col')
+        print('exception in display_browser_in_urwid_columns', e)
+    # end('col')
 
-def create_column_pile(urwid_cols, df_view, col_name, is_focus_col):
+def create_column_pile(urwid_cols, view, col_name, is_focus_col):
     col_disp_attr = 'def' if not is_focus_col else 'active_col'
     selected_row_attr = 'active_element' if is_focus_col else 'active_row'
-    selected_row = df_view.selected_relative
-    column_header = df_view.header(col_name)
-    column_strings = df_view.lines(col_name)
-    align = df_view.justify(col_name)
+    selected_row = view.selected_relative
+    column_header = view.header(col_name)
+    column_strings = view.lines(col_name)
+    align = view.justify(col_name)
     part_one = column_header
-    part_one += '\n...\n' if df_view.top_row > 1 and is_focus_col else '\n\n'
+    part_one += '\n...\n' if view.top_row > 1 and is_focus_col else '\n\n'
     part_one += '\n'.join(column_strings[0:selected_row])
     part_two =  '\n'.join(column_strings[selected_row + 1: len(column_strings)])
     return create_column_from_text_and_attrib(part_one, column_strings[selected_row], part_two,
@@ -90,21 +86,17 @@ class Minibuffer(urwid.WidgetWrap):
         self.edit_text = urwid_utils.AdvancedEdit(caption='browsing... ', multiline=False)
         urwid.WidgetWrap.__init__(self, self.edit_text)
         self.active_command = 'browsing'
-        self.active_args = None
-    def add(self, completion_cb=None):
-        if completion_cb is not None:
-            self.edit_text.setCompletionMethod(completion_cb)
-        self.edit_text.set_caption('add column: ')
-        self.urwid_browser.frame.focus_position = 'footer'
-        self.enter_cb = None
+        self.active_args = dict()
     def focus_granted(self, command, **kwargs):
         self._set_command(command, **kwargs)
     def focus_removed(self):
         self._set_command('browsing')
         self.edit_text.set_caption('browsing... ')
+        self.edit_text.setCompletionMethod()
     def give_away_focus(self):
         # this should call back to focus_removed
         self.edit_text.set_edit_text('')
+        self.active_args = dict()
         self.urwid_browser.focus_browser()
     def merge(self, completion_cb=None):
         # TODO this looks bad
@@ -117,7 +109,13 @@ class Minibuffer(urwid.WidgetWrap):
         self.edit_text.set_caption(command + ': ')
         if self.active_command == 'query':
             self.edit_text.set_edit_text(self.active_args['column_name'])
+            self.edit_text.set_edit_pos(len(self.edit_text.get_edit_text()) + 1)
+        if 'completer' in self.active_args:
+            self.edit_text.setCompletionMethod(self.active_args['completer'])
+        if 'default_text' in self.active_args:
+            self.edit_text.set_edit_text(self.active_args['default_text'])
             self.edit_text.set_edit_pos(len(self.edit_text.get_edit_text()))
+
     def _search(self, search_str, down, skip_current):
         if 'search' in self.active_command:
             if down:
@@ -127,17 +125,22 @@ class Minibuffer(urwid.WidgetWrap):
             self.urwid_browser.colview.search_current_col(search_str, down, skip_current)
     def keypress(self, size, key):
         if key == 'enter':
-            cmd_str = self.edit_text.get_edit_text()
+            cmd_str = self.edit_text.get_edit_text().strip()
             print('handling input string', cmd_str)
             if self.active_command == 'query':
-                self.urwid_browser.df_view.query(cmd_str)
+                self.urwid_browser.colview.browser.query(cmd_str)
                 self.give_away_focus()
             elif self.active_command == 'add':
-                if self.urwid_browser.colview.add_col(cmd_str):
+                if self.urwid_browser.colview.insert_column(cmd_str):
                     self.give_away_focus()
                 else:
-                    self.urwid_browser.modeline.set_text(str(name) + ' not in df')
-                    # self.browser.modeline.set_text(str(list(self.browser.colview.df)))
+                    self.urwid_browser.modeline.set_text(str(cmd_str) + ' column not found in table browser')
+            elif self.active_command == 'name current browser':
+                self.urwid_browser.colview.name_current_browser(cmd_str)
+                self.give_away_focus()
+            elif self.active_command == 'switch to browser':
+                self.urwid_browser.colview.switch_to_browser(None, cmd_str)
+                self.give_away_focus()
         elif key == 'esc' or key == 'ctrl g':
             self.give_away_focus()
         elif key == 'ctrl c':
@@ -173,7 +176,7 @@ class SelectableText(urwid.Text):
     #     return None
 
 
-class UrwidDFColumnView(urwid.WidgetWrap):
+class UrwidColumnView(urwid.WidgetWrap):
     def __init__(self, urwid_frame):
         self.urwid_frame = urwid_frame
         self.urwid_cols = urwid.Columns([], dividechars=1)
@@ -181,6 +184,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
 
         self.browsers = dict()
         self.active_browser_name = None
+        self.last_focused_column = dict()
 
     @property
     def browser(self):
@@ -190,12 +194,16 @@ class UrwidDFColumnView(urwid.WidgetWrap):
         return self._col_by_index(self.focus_pos)
     @property
     def focus_pos(self):
-        return self.urwid_cols.focus_position
+        try:
+            return self.urwid_cols.focus_position
+        except:
+            return self.last_focused_column[self.active_browser_name]
     def _col_by_index(self, idx):
         return self.browser.browse_columns[idx]
 
-    def switch_to_df(self, df, name=None):
+    def switch_to_browser(self, df, name=None):
         """Open an existing dataframe, or accept a new one."""
+        print('switching to', name)
         i = len(self.browsers)
         while not name:
             name = 'df' + str(i)
@@ -203,19 +211,33 @@ class UrwidDFColumnView(urwid.WidgetWrap):
                 i += 1
                 name = None # keep trying til we find something valid
         if name not in self.browsers:
+            print('making new browser')
             self.browsers[name] = DataframeBrowser(df)
             self.browsers[name].add_change_callback(self.update_view)
+            self.last_focused_column[name] = 0
         self.active_browser_name = name
+        del self.urwid_cols.contents[:]
         self.update_view()
 
+    def name_current_browser(self, new_name):
+        if new_name not in self.browsers.keys():
+            browser = self.browsers.pop(self.active_browser_name)
+            focus_column = self.last_focused_column.pop(self.active_browser_name)
+            self.browsers[new_name] = browser
+            self.last_focused_column[new_name] = focus_column
+            self.active_browser_name = new_name
+
     def update_view(self, browser=None):
-        print('updating view')
-        display_df_in_urwid_columns(self.urwid_cols, self.browser)
-        self.update_text()
+        try:
+            print('updating view')
+            display_browser_in_urwid_columns(self.urwid_cols, self.browser, self.focus_pos)
+            self.update_text()
+        except Exception as e:
+            print('exception in update view', e)
 
     def update_text(self):
         self.urwid_frame.modeline.set_text(str(self.browser.view.selected_row_content(
-            self.browser.browse_columns[self.urwid_cols.focus_position]))) # TODO this breaks encapsulation
+            self.browser.browse_columns[self.urwid_cols.focus_position])))
     # # TODO move everything having to do with focus position and 'view'
     # # out of this class and into either the class containing the undo history,
     # # or into another class that would wrap that class.
@@ -237,10 +259,10 @@ class UrwidDFColumnView(urwid.WidgetWrap):
                 set_attrib_on_col_pile(self.urwid_cols.contents[focus_pos][0], False)
                 set_attrib_on_col_pile(self.urwid_cols.contents[col_num][0], True)
                 self.urwid_cols.focus_position = col_num
+                self.last_focused_column[self.active_browser_name] = col_num
                 self.update_text()
             return True
         except Exception as e:
-            hint('failed to set focus to '+ str(col_num + 1))
             print('exception in set focus' + e)
             return False
 
@@ -255,6 +277,7 @@ class UrwidDFColumnView(urwid.WidgetWrap):
     def shift_col(self, shift_num):
         if self.browser.shift_column(self.urwid_cols.focus_position, shift_num):
             self.urwid_cols.focus_position += shift_num
+            self.last_focused_column[self.active_browser_name] += shift_num
             self.update_view() # TODO this incurs a double update penalty but is necessary because the focus_position can't change until we know that the shift column was actually doable/successful
 
     def jump_to_col(self, num):
@@ -272,23 +295,27 @@ class UrwidDFColumnView(urwid.WidgetWrap):
     #     return None
     # TODO verify that this works...
 
-    def add_col(self, col_name, idx=None):
+    def insert_column(self, col_name, idx=None):
         try:
             if not idx or idx < 0 or idx > self.urwid_cols.focus_position:
                 idx = self.urwid_cols.focus_position
-        except: # if for some reason cols.focus_position doesn't exist at all...
+        except Exception as e: # if for some reason cols.focus_position doesn't exist at all...
+            print('exception in insert column', e)
             idx = 0
-        return self.browser.add_col(col_name, idx)
+        return self.browser.insert_column(col_name, idx)
 
     def hide_current_col(self):
         return self.browser.hide_col_by_index(self.urwid_cols.focus_position)
+
+    def _get_completer_with_hint(self, lst):
+        return urwid_utils.ListCompleter(lst, self.urwid_frame.hint).complete
 
     # BROWSE COMMANDS
     def keypress(self, size, key):
         # TODO move key bindings into dict of arrays
         if key in keybs('merge'):
-            self.urwid_frame.minibuffer.merge(urwid_utils.ListCompleter(list(self.browser.smerge)))
-        elif key in keybs('hide'):
+            pass
+        elif key in keybs('hide column'):
             self.hide_current_col()
         elif key in keybs('search down'):
             self.urwid_frame.focus_minibuffer('search')
@@ -300,8 +327,9 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             self.sort_current_col(ascending=False)
         elif key == 'f':
             pass # filter?
-        elif key == 'a':
-            self.urwid_frame.minibuffer.add(urwid_utils.ListCompleter(list(self.browser.df), hint).complete)
+        elif key == 'i':
+            self.urwid_frame.focus_minibuffer('add', completer=self._get_completer_with_hint(
+                list(self.browser.all_columns)))
         elif key in keybs('browse right'):
             self.set_focus(self.urwid_cols.focus_position + 1)
         elif key in keybs('browse left'):
@@ -337,11 +365,19 @@ class UrwidDFColumnView(urwid.WidgetWrap):
             self.browser.view.jump(fraction=0.0)
             self.update_view()
         elif key in keybs('jump to numeric column'):
-            self.jump_to_col(int(key) - 1) # 1-based indexing
+            self.jump_to_col(int(key) - 1) # 1-based indexing when using number keys
+        elif key in keybs('jump to last column'):
+            self.jump_to_col(len(self.browser.browse_columns) - 1)
+        elif key in keybs('jump to first column'):
+            self.jump_to_col(0)
+        elif key in keybs('name current browser'):
+            self.urwid_frame.focus_minibuffer('name current browser', default_text=self.active_browser_name)
+        elif key in keybs('switch to browser'):
+            self.urwid_frame.focus_minibuffer('switch to browser', completer=self._get_completer_with_hint(
+                list(self.browsers.keys())))
         else:
-            hint('got unknown keypress: ' + key)
+            self.urwid_frame.hint('got unknown keypress: ' + key)
             return None
-
 
 def trace_keyp(size, key):
     if key == 'p':
@@ -365,12 +401,12 @@ class UrwidDFBFrame:
         self.modeline = Modeline()
         self.modeline.show_basic_commands()
         self.minibuffer = Minibuffer(self)
-        self.colview = UrwidDFColumnView(self)
+        self.colview = UrwidColumnView(self)
         self.inner_frame = urwid.Frame(urwid.Filler(self.colview, valign='top'),
                                        footer=urwid.AttrMap(self.modeline, 'modeline'))
         self.frame = urwid.Frame(self.inner_frame, footer=self.minibuffer)
     def browse(self, df, name=None):
-        self.colview.switch_to_df(df, name)
+        self.colview.switch_to_browser(df, name)
     def start(self):
         self.loop = urwid.MainLoop(self.frame, palette, # input_filter=self.input,
                                    unhandled_input=self.unhandled_input)
@@ -394,13 +430,9 @@ class UrwidDFBFrame:
         elif key == 'ctrl c':
             self.modeline.set_text('got Ctrl-C')
         else:
-            hint('unhandled input ' + str(key))
-
-urwid_frame = None
-
-def hint(text):
-    if urwid_browser:
-        urwid_browser.modeline.set_text(text)
+            print('unhandled input ' + str(key))
+    def hint(self, text):
+        self.modeline.set_text(text)
 
 # TODO this is a convenience that should probably move elsewhere eventually
 def read_all_dfs_from_dir(directory):
@@ -416,9 +448,8 @@ def start_browser(dfs_and_names, df_name='dubois_mathlete_identities'):
     global urwid_frame
     urwid_frame = UrwidDFBFrame()
     for df, name in dfs_and_names:
-        if name == df_name:
-            break
-    urwid_frame.browse(df, name)
+        urwid_frame.browse(df, name)
+    urwid_frame.browse(None, df_name)
     urwid_frame.start()
     return urwid_frame
 

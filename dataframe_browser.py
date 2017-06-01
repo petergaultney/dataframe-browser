@@ -5,14 +5,15 @@ from smartmerge import DataframeSmartMerger
 
 from _debug import *
 
-def add_column(columns, col_name, index):
+def insert_column(columns, col_name, index):
     if col_name in columns and columns[index] == col_name:
         return columns # done. no new list, b/c no change happened.
-
     new_cols = columns[:] # make new list, b/c we're making a change
     if col_name in columns:
-        cur_idx = columns.index(col_name)
-        new_cols.insert(index, columns.pop(cur_idx))
+        print(columns)
+        cur_idx = new_cols.index(col_name)
+        new_cols.insert(index, new_cols.pop(cur_idx))
+        print(new_cols)
     else:
         new_cols.insert(index, col_name)
     return new_cols
@@ -59,11 +60,14 @@ class DataframeBrowser(object):
     def df(self):
         return self.df_hist[-1]
     @property
+    def original_df(self):
+        return self.df_hist[0]
+    @property
     def browse_columns(self):
         return self.browse_columns_history[-1]
     @property
-    def original_df(self):
-        return self.df_hist[0]
+    def all_columns(self):
+        return list(self.original_df.columns)
 
     def __len__(self):
         return len(self.df)
@@ -96,10 +100,9 @@ class DataframeBrowser(object):
         self.undo_hist.append(self.df_hist)
         self._msg_cbs()
 
-    # TODO rename to insert_column
-    def add_col(self, col_name, index):
+    def insert_column(self, col_name, index):
         if col_name in list(self.df):
-            new_dcols = add_column(self.browse_columns, col_name, index)
+            new_dcols = insert_column(self.browse_columns, col_name, index)
             return self._change_display_cols(self.browse_columns, new_dcols)
         return False
 
@@ -180,7 +183,7 @@ class DataframeView(object):
         # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
         # from which the search should begin.
 
-    # TODO : jump to column, insert column at point, filter/where
+    # TODO : jump to column, filter/where
 
     @property
     def df(self):

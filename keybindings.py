@@ -1,7 +1,7 @@
 # supports multiple keybindings per command
 _commands = { # these commands are specifically for use in the browser
     'merge': ['m'],
-    'hide': ['H'],
+    'hide column': ['H'],
     'search down': ['ctrl s'],
     'search up': ['ctrl r'],
     'sort ascending': ['s'],
@@ -23,6 +23,10 @@ _commands = { # these commands are specifically for use in the browser
     'jump to last row': ['meta >'],
     'jump to first row': ['meta <'],
     'jump to numeric column': list('1234567890'),
+    'jump to last column': ['ctrl e'],
+    'jump to first column': ['ctrl a'],
+    'name current browser': ['n'],
+    'switch to browser': ['b'],
 }
 
 # on startup, verify no duplicate keybindings for developer sanity
