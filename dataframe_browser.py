@@ -44,26 +44,30 @@ class MultipleDataframeBrowser(object):
         """Direct interface to adding a dataframe.
 
         Preferably provide your own name here, but if you don't, we'll assign one..."""
+        assert df is not None
         i = len(self.browsers)
         while not name:
             name = 'df' + str(i)
             if name in self.browsers:
                 i += 1
                 name = None # keep trying til we find something valid
-        if name not in self.browsers:
-            print('making new table browser')
-            self.browsers[name] = DataframeTableBrowser(df)
-            # self.browsers[name].add_change_callback(self.update_view)
-            # self.last_focused_column[name] = 0
+        name = name.strip()
+        print('making new table browser with name ', name)
+        self.browsers[name] = DataframeTableBrowser(df)
         if not self.active_browser_name:
             self.active_browser_name = name
-        return self # for chaining, e.g.
+        return self # for call chaining
 
-    def rename_current_browser(self, new_name):
-        if new_name not in self.multibrowser:
-            browser = self.browsers.pop(self.active_browser_name)
+    def rename_browser(self, current_name, new_name):
+        new_name = new_name.strip()
+        assert current_name and new_name
+        if new_name not in self.browsers and current_name != new_name:
+            browser = self.browsers.pop(current_name)
             self.browsers[new_name] = browser
             self.active_browser_name = new_name
+
+    def rename_current_browser(self, new_name):
+        self.rename_browser(self.active_browser_name, new_name)
 
     def copy_browser(self, name, new_name=None):
         pass
@@ -72,27 +76,46 @@ class MultipleDataframeBrowser(object):
         pass
 
     def __getitem__(self, df_name):
-        return self.browsers[df_name]
+        """This returns the actual backing dataframe."""
+        return self.browsers[df_name].df
+
+    def __getattr__(self, df_name):
+        """This returns the actual backing dataframe."""
+        return self.browsers[df_name].df
+
+    def __setitem__(self, name, df):
+        assert name
+        self.add_df(df, name)
+
+    def get_browser(self, name):
+        return self.browsers[name]
+
     @property
     def current_browser(self):
         return self.browsers[self.active_browser_name] if self.active_browser_name else None
+    @current_browser.setter
+    def current_browser(self, name):
+        if name in self.browsers:
+            self.active_browser_name = name
+    def set_current_browser(self, name):
+        self.current_browser = name
+        return self
+
     @property
     def current_browser_name(self):
         return self.active_browser_name
     @property
     def all_browser_names(self):
-        return self.browsers.keys()
-
-    def set_current_browser(self, name):
-        if name in self.browsers:
-            self.active_browser_name = name
-        return self
+        return list(self.browsers.keys())
 
     def browse(self):
         """This actually brings up the interface. Can be re-entered after it exits and returns."""
         self.urwid_frame.start(self)
         return self # for the ultimate chain, that returns itself so it can be started again.
 
+    @property
+    def fg(self):
+        self.browse()
 
 
 # the DataframeTableBrowser implements an interface of sorts that
@@ -100,6 +123,9 @@ class MultipleDataframeBrowser(object):
 # It maintains history and implements the API necessary for viewing a dataframe as a table.
 # TODO provide separate callbacks for when the dataframe itself has changed
 # vs when the column order/set has changed.
+#
+# Please note that this class will not behave well if you have multiple columns with the same
+# column name.
 class DataframeTableBrowser(object):
     """Implements the table browser contract for a single pandas Dataframe."""
     def __init__(self, df):
@@ -142,7 +168,7 @@ class DataframeTableBrowser(object):
             cb(self)
 
     def sort_on_columns(self, columns, ascending=True, algorithm='mergesort', na_position=None): # we default to mergesort to stay stable
-        na_position = na_position if na_position != None else ('last' if ascending else 'first')
+        na_position = na_position if na_position is not None else ('last' if ascending else 'first')
         sorted_df = self.df.sort_values(columns, ascending=ascending, kind=algorithm, na_position=na_position)
         self._change_df(self.df, sorted_df)
 
@@ -206,7 +232,9 @@ class DataframeTableBrowser(object):
             self.change_cbs.append(cb)
 
     def query(self, query_str):
+        print('running query', query_str)
         new_df = self.df.query(query_str)
+        print(len(new_df))
         return self._change_df(self.df, new_df)
 
 
@@ -214,7 +242,7 @@ class defaultdict_of_DataframeColumnSegmentCache(defaultdict):
     def __init__(self, get_df):
         self.get_df = get_df
     def __missing__(self, column_name):
-        assert column_name != None
+        assert column_name is not None
         cc = DataframeColumnSegmentCache(lambda : self.get_df(), column_name)
         self[column_name] = cc
         return cc
@@ -265,11 +293,11 @@ class DataframeRowView(object):
     def width(self, column_name):
         return self._column_cache[column_name].width
     def lines(self, column_name, top_row=None, bottom_row=None):
-        top_row = top_row if top_row != None else self._top_row
-        bottom_row = bottom_row if bottom_row != None else min(top_row + self.view_height, len(self.df))
+        top_row = top_row if top_row is not None else self._top_row
+        bottom_row = bottom_row if bottom_row is not None else min(top_row + self.view_height, len(self.df))
         return self._column_cache[column_name].rows(top_row, bottom_row)
     def selected_row_content(self, column_name):
-        return self.df.ix[self._selected_row,column_name]
+        return self.df.iloc[self._selected_row, self.df.columns.get_loc(column_name)]
     def change_column_width(self, column_name, n):
         self._column_cache[column_name].change_width(n)
     def justify(self, column_name):
@@ -278,22 +306,23 @@ class DataframeRowView(object):
     def search(self, column_name, search_string, down=True, skip_current=False, case_insensitive=False):
         """search downward or upward in the current column for a string match.
         Can exclude the current row in order to search 'farther' in the dataframe."""
-        case_insensitive = case_insensitive if case_insensitive != None else search_string.islower()
+        case_insensitive = case_insensitive if case_insensitive is not None else search_string.islower()
         starting_row = self._selected_row + int(skip_current) if down else self._selected_row - int(skip_current)
         df_index = self._column_cache[column_name].search_cache(search_string, starting_row, down, case_insensitive)
-        if df_index != None:
+        if df_index is not None:
             self.scroll_rows(df_index - self._selected_row)
             return True
         return False
 
     def jump(self, fraction=None, pos=None):
-        if fraction != None:
+        if fraction is not None:
             assert fraction >= 0.0 and fraction <= 1.0
             pos = fraction * len(self.df)
         self.scroll_rows(pos - self._selected_row)
 
     def scroll_rows(self, n):
         """ positive numbers are scroll down; negative are scroll up"""
+        print('scrolling rows', self._selected_row, n)
         self._selected_row = max(0, min(self._selected_row + n, len(self.df) - 1))
         if n > 0:
             while self._selected_row > self._top_row + self.scroll_margin_down:
@@ -306,6 +335,9 @@ class DataframeRowView(object):
     def df_changed(self, browser=None):
         for col_name, cache in self._column_cache.items():
             cache.clear_cache()
+        new_df_last_row = len(self.df) - 1
+        self._selected_row = max(0, min(self._selected_row, new_df_last_row))
+        self._top_row = max(0, min(self._top_row, new_df_last_row))
 
 
 class DataframeColumnSegmentCache(object):
@@ -379,24 +411,25 @@ class DataframeColumnSegmentCache(object):
     def search_cache(self, search_string, starting_row, down, case_insensitive):
         """Returns absolute index where search_string was found; otherwise -1"""
         # TODO this code 100% works, but could it be cleaner?
+        df = self.get_src_df()
         print('***** NEW SEARCH', self.column_name, search_string, starting_row, down, case_insensitive)
         starting_row_in_cache = starting_row - self.top_of_cache
         print('running search on current cache, starting at row ', starting_row_in_cache)
         row_idx = search_list_for_str(self.row_strings, search_string, starting_row_in_cache, down, case_insensitive)
-        if row_idx != None:
+        if row_idx is not None:
             print('found item at row_idx', row_idx + self.top_of_cache)
             return row_idx + self.top_of_cache
         else:
             print('failed local cache search - moving on to iterate through dataframe')
             # search by chunk through dataframe starting from current search position in cache
             end_of_cache_search = self.top_of_cache + len(self.row_strings) if down else self.top_of_cache
-            df_sliceable = DataframeColumnSliceToStringList(self.get_src_df(), self.column_name, self.justify)
+            df_sliceable = DataframeColumnSliceToStringList(df, self.column_name, self.justify)
             for chunk, chunk_start_idx in search_chunk_yielder(df_sliceable, end_of_cache_search, down):
                 chunk_idx = search_list_for_str(chunk, search_string, 0 if down else len(chunk) - 1, down, case_insensitive)
-                if chunk_idx != None:
+                if chunk_idx is not None:
                     actual_idx = chunk_idx + chunk_start_idx
                     print('found', search_string, 'at chunk idx', chunk_idx, 'in chunk starting at', chunk_start_idx,
-                          'which makes real idx', actual_idx, 'with result proof:', self.get_src_df().ix[actual_idx,self.column_name])
+                          'which makes real idx', actual_idx, 'with result proof:', df.iloc[actual_idx,df.columns.get_loc(self.column_name)])
                     return actual_idx
                 else:
                     print('not found in this chunk...')

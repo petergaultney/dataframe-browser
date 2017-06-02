@@ -3,7 +3,6 @@ import urwid
 import urwid_utils
 import sys, re, os
 import pandas as pd
-from dataframe_browser import DataframeTableBrowser
 from keybindings import keybs
 
 from gui_debug import *
@@ -252,6 +251,7 @@ class UrwidTableView(urwid.WidgetWrap):
         """Open an existing dataframe, or accept a new one."""
         print('switching to', name)
         self.multibrowser.set_current_browser(name)
+        self.browser.add_change_callback(self.update_view)
         self.update_view()
 
     def name_current_browser(self, new_name):
@@ -273,7 +273,7 @@ class UrwidTableView(urwid.WidgetWrap):
 
     def update_text(self):
         self.urwid_frame.modeline.set_text(str(self.browser.view.selected_row_content(
-            self.browser.browse_columns[self.urwid_cols.focus_position])))
+            self.browser.browse_columns[self.focus_pos])))
 
     def scroll(self, num_rows):
         self.browser.view.scroll_rows(num_rows)
