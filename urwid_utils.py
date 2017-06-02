@@ -1,6 +1,8 @@
 import urwid
 import sys
+import os
 
+from gui_debug import *
 
 # It appears that I found this here: https://wiki.goffi.org/wiki/Urwid-satext/en
 class AdvancedEdit(urwid.Edit):
@@ -23,7 +25,7 @@ class AdvancedEdit(urwid.Edit):
                       this dict must be used (and can be filled) to find next completion)
                    and which return the full text completed"""
         self.completion_cb = callback
-        self.completion_data = {}
+        self.completion_data = dict()
 
     def keypress(self, size, key):
         if key == 'ctrl a':
@@ -73,8 +75,13 @@ class ListCompleter:
         except (KeyError,ValueError):
             start_idx = 0
 
-        options = [word if word.startswith(prefix) else '' for word in self.words]
-        self.hint('options: ' + ' '.join(str(t) + ' ' for t in options))
+        options = [word if word.startswith(prefix) else None for word in self.words]
+        options = [word for word in options if word is not None]
+        self.hint('options: ' + ' '.join(str(t) for t in options))
+
+        common_prefix = os.path.commonprefix(options)
+        if start_idx == 0:
+            return common_prefix
 
         for idx in list(range(start_idx, len(self.words))) + list(range(0, start_idx)):
             if self.words[idx].lower().startswith(prefix):

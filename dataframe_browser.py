@@ -1,24 +1,118 @@
+#!/usr/bin/env python
 from collections import defaultdict
+import os
 import pandas as pd
 import numpy as np
 
 from list_utils import *
 from chunk_search_utils import *
 
+import urwid_table_browser
+
 from gui_debug import *
 
-# the DFBrowser basically maintains an undo history
-# and helps provide a basic API for how a dataframe can be viewed.
+_global_urwid_browser_frame = None
+
+def browse(df, name=None):
+    return MultipleDataframeBrowser().add_df(df, name).browse()
+
+
+def browse_dir(directory_of_csvs):
+    mdb = MultipleDataframeBrowser()
+    dataframes_and_names = list()
+    for fn in os.listdir(directory_of_csvs):
+        df = pd.read_csv(directory_of_csvs + os.sep + fn, index_col=False)
+        name = fn[:-4]
+        mdb.add_df(df, name)
+    return mdb.browse()
+
+
+class MultipleDataframeBrowser(object):
+    """Create one of these to start browsing pandas Dataframes in a curses-style terminal interface."""
+    def __init__(self, table_browser_frame=None):
+        global _global_urwid_browser_frame
+        if not table_browser_frame:
+            if not _global_urwid_browser_frame:
+                _global_urwid_browser_frame = urwid_table_browser.TableBrowserUrwidLoopFrame()
+            self.urwid_frame = _global_urwid_browser_frame
+        else:
+            self.urwid_frame = table_browser_frame
+        self.browsers = dict()
+        self.active_browser_name = None
+
+    def add_df(self, df, name=None):
+        """Direct interface to adding a dataframe.
+
+        Preferably provide your own name here, but if you don't, we'll assign one..."""
+        i = len(self.browsers)
+        while not name:
+            name = 'df' + str(i)
+            if name in self.browsers:
+                i += 1
+                name = None # keep trying til we find something valid
+        if name not in self.browsers:
+            print('making new table browser')
+            self.browsers[name] = DataframeTableBrowser(df)
+            # self.browsers[name].add_change_callback(self.update_view)
+            # self.last_focused_column[name] = 0
+        if not self.active_browser_name:
+            self.active_browser_name = name
+        return self # for chaining, e.g.
+
+    def rename_current_browser(self, new_name):
+        if new_name not in self.multibrowser:
+            browser = self.browsers.pop(self.active_browser_name)
+            self.browsers[new_name] = browser
+            self.active_browser_name = new_name
+
+    def copy_browser(self, name, new_name=None):
+        pass
+
+    def open_new_browser(self, **kwargs):
+        pass
+
+    def __getitem__(self, df_name):
+        return self.browsers[df_name]
+    @property
+    def current_browser(self):
+        return self.browsers[self.active_browser_name] if self.active_browser_name else None
+    @property
+    def current_browser_name(self):
+        return self.active_browser_name
+    @property
+    def all_browser_names(self):
+        return self.browsers.keys()
+
+    def set_current_browser(self, name):
+        if name in self.browsers:
+            self.active_browser_name = name
+        return self
+
+    def browse(self):
+        """This actually brings up the interface. Can be re-entered after it exits and returns."""
+        self.urwid_frame.start(self)
+        return self # for the ultimate chain, that returns itself so it can be started again.
+
+
+
+# the DataframeTableBrowser implements an interface of sorts that
+# the Urwid table browser uses to display a table.
+# It maintains history and implements the API necessary for viewing a dataframe as a table.
 # TODO provide separate callbacks for when the dataframe itself has changed
 # vs when the column order/set has changed.
-class DataframeBrowser(object):
+class DataframeTableBrowser(object):
+    """Implements the table browser contract for a single pandas Dataframe."""
     def __init__(self, df):
         self.df_hist = [df]
         self.browse_columns_history = [list(df.columns)]
         self.undo_hist = list()
         self.change_cbs = list()
-        self.view = DataframeView(lambda: self.df)
+        self.view = DataframeRowView(lambda: self.df)
         self.add_change_callback(self.view.df_changed)
+        self._focused_column = 0
+
+    # TODO Join
+    # TODO support displaying index as column.
 
     @property
     def df(self):
@@ -32,6 +126,13 @@ class DataframeBrowser(object):
     @property
     def all_columns(self):
         return list(self.original_df.columns)
+    @property
+    def focused_column(self):
+        return self._focused_column
+    @focused_column.setter
+    def focused_column(self, new_focus_col):
+        assert new_focus_col < len(self.browse_columns) and new_focus_col >= 0
+        self._focused_column = new_focus_col
 
     def __len__(self):
         return len(self.df)
@@ -109,16 +210,16 @@ class DataframeBrowser(object):
         return self._change_df(self.df, new_df)
 
 
-class dfcol_defaultdict(defaultdict):
+class defaultdict_of_DataframeColumnSegmentCache(defaultdict):
     def __init__(self, get_df):
         self.get_df = get_df
     def __missing__(self, column_name):
         assert column_name != None
-        cc = DataframeColumnCache(lambda : self.get_df(), column_name)
+        cc = DataframeColumnSegmentCache(lambda : self.get_df(), column_name)
         self[column_name] = cc
         return cc
 
-# Note that DataframeBrowser (i.e. history) is responsible for the columns of the dataframe and the dataframe itself
+# Note that DataframeTableBrowser is responsible for the columns of the dataframe and the dataframe itself
 # whereas this class is responsible for the view into the rows.
 # This decision is based on the fact that scrolling up and down through a dataset
 # is not considered to be a useful 'undo' operation, since it is immediately reversible,
@@ -133,20 +234,20 @@ class dfcol_defaultdict(defaultdict):
 # if the individual column views could register for callbacks during dataframe changes.
 # The history object can be responsible for maintaining the history
 # of dataframes and column hides/shifts
-class DataframeView(object):
+class DataframeRowView(object):
     DEFAULT_VIEW_HEIGHT = 100
-    def __init__(self, get_df, normal_cache_size=200, cache_above_top=50):
+    def __init__(self, get_df):
         self._get_df = get_df
         self._top_row = 0 # the top row in the dataframe that's in view
         self._selected_row = 0
-        self._view_height = DataframeView.DEFAULT_VIEW_HEIGHT
-        self._column_cache = dfcol_defaultdict(lambda: self.df)
+        self._column_cache = defaultdict_of_DataframeColumnSegmentCache(lambda: self.df)
+        self.view_height = DataframeRowView.DEFAULT_VIEW_HEIGHT
         self.scroll_margin_up = 10 # TODO these are very arbitrary and honestly it might be better
         self.scroll_margin_down = 30 # if they didn't exist inside this class at all.
         # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
         # from which the search should begin.
 
-    # TODO: str.contains/match, Join
+    # TODO: str.contains/match
 
     @property
     def df(self):
@@ -156,7 +257,7 @@ class DataframeView(object):
         return self._top_row
     @property
     def selected_relative(self):
-        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
+        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self.view_height
         return self._selected_row - self._top_row
 
     def header(self, column_name):
@@ -165,7 +266,7 @@ class DataframeView(object):
         return self._column_cache[column_name].width
     def lines(self, column_name, top_row=None, bottom_row=None):
         top_row = top_row if top_row != None else self._top_row
-        bottom_row = bottom_row if bottom_row != None else min(top_row + self._view_height, len(self.df))
+        bottom_row = bottom_row if bottom_row != None else min(top_row + self.view_height, len(self.df))
         return self._column_cache[column_name].rows(top_row, bottom_row)
     def selected_row_content(self, column_name):
         return self.df.ix[self._selected_row,column_name]
@@ -200,14 +301,14 @@ class DataframeView(object):
         elif n < 0:
             while self._selected_row < self._top_row + self.scroll_margin_up and self._top_row > 0:
                 self._top_row -= 1
-        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self._view_height
+        assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self.view_height
 
     def df_changed(self, browser=None):
         for col_name, cache in self._column_cache.items():
             cache.clear_cache()
 
 
-class DataframeColumnCache(object):
+class DataframeColumnSegmentCache(object):
     MIN_WIDTH = 2
     MAX_WIDTH = 50
     DEFAULT_CACHE_SIZE = 200
@@ -235,8 +336,8 @@ class DataframeColumnCache(object):
                 self._update_native_width()
             self.assigned_width = self.native_width
         self.assigned_width += n
-        self.assigned_width = max(DataframeColumnCache.MIN_WIDTH,
-                                  min(DataframeColumnCache.MAX_WIDTH, self.assigned_width))
+        self.assigned_width = max(DataframeColumnSegmentCache.MIN_WIDTH,
+                                  min(DataframeColumnSegmentCache.MAX_WIDTH, self.assigned_width))
     @property
     def justify(self):
         return 'right' if self.is_numeric else 'left'
@@ -312,3 +413,8 @@ class DataframeColumnSliceToStringList(object):
                                            columns=[self.column], justify=self.justify).split('\n')
     def __len__(self):
         return len(self.df)
+
+
+if __name__ == '__main__':
+    import sys
+    browse_dir(sys.argv[1])

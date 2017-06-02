@@ -25,8 +25,8 @@ _commands = { # these commands are specifically for use in the browser
     'jump to numeric column': list('1234567890'),
     'jump to last column': ['ctrl e'],
     'jump to first column': ['ctrl a'],
-    'name current browser': ['n'],
-    'switch to browser': ['b'],
+    'name current table browser': ['n'],
+    'switch to table browser': ['b'],
 }
 
 # on startup, verify no duplicate keybindings for developer sanity
