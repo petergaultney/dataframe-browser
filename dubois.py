@@ -1,5 +1,6 @@
 from sdb_utils import *
 import dataframe_browser
+import smartmerge
 import os
 
 class DuboisDomain:
@@ -55,7 +56,7 @@ def get_readonly_conn():
 
 def download_recent_domain_data(conn, ddomains=_dubois_domains,
                                 date_start=yesterday(), date_end=None, lcl_dir='local_data'):
-    df_merger = dataframe_browser.DataFrameSmartMerger()
+    df_merger = smartmerge.DataframeSmartMerger()
     #downloaded_resultsets = dict()
     # download the daterange
     for dd in ddomains:

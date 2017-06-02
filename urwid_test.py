@@ -27,6 +27,8 @@ def display_browser_in_urwid_columns(urwid_cols, browser, focus_col, is_focus_co
     # st() # DEBUG
     del urwid_cols.contents[:]
 
+    # TODO don't recreate these piles - instead keep track of them
+    # and re-order/refresh them as necessary, only creating new ones when new columns are shown
     for idx, col_name in enumerate(browser.browse_columns):
         pile = BrowserNamedColumnPile(browser.view, col_name, is_focus_col,
                                       set_focus_column_by_name)
@@ -111,8 +113,6 @@ class Modeline(urwid.WidgetWrap):
         self.set_text('(hjkl) browse; (H)ide col; (u)ndo; (+-) size col; (,.) move col; (ctrl-s)ea(r)ch col; (s)o(r)t')
     def show_command_options(self):
         self.set_text('type column name to add, then press enter. Press Esc to return to browsing.')
-    def keypress(self, size, key):
-        raise urwid.ExitMainLoop('somehow put focus on help text!')
 
 
 class Minibuffer(urwid.WidgetWrap):

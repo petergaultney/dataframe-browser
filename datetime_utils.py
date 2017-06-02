@@ -2,6 +2,12 @@ import datetime as dt
 from interactive_utils import *
 import readline
 
+def months_ago(n):
+    # now = dt.datetime.now()
+    # then = now - dt.timedelta(7)
+    # return then
+    return days_ago(30 * int(n))
+
 def weeks_ago(n):
     # now = dt.datetime.now()
     # then = now - dt.timedelta(7)
@@ -26,9 +32,10 @@ def now():
 rangefuncs = {
     'today':today,
     'yesterday':yesterday,
-    'weeks_ago':weeks_ago,
-    'days_ago':days_ago,
-    'hours_ago':hours_ago
+    'weeks':weeks_ago,
+    'days':days_ago,
+    'hours':hours_ago,
+    'months':months_ago,
 }
 
 def ask_for_date():
