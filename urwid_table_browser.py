@@ -359,8 +359,7 @@ class UrwidTableView(urwid.WidgetWrap):
 
     def shift_col(self, shift_num):
         if self.browser.shift_column(self.focus_pos, shift_num):
-            self.urwid_cols.focus_position += shift_num
-            self.browser.focused_column += shift_num
+            self.set_col_focus(self.browser.focused_column + shift_num)
             self.update_view() # TODO this incurs a double update penalty but is necessary because the focus_position can't change until we know that the shift column was actually doable/successful
 
     def jump_to_col(self, num):
