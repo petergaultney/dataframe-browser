@@ -1,5 +1,4 @@
-# dataframe-browser
-Python library for interactively browsing a pandas Dataframe
+# dubois-project-data-browser
+Python utilities for browsing data used by the Dubois Project
 
-Requires urwid library: https://github.com/wardi/urwid
-Also requires pandas, obviously.
+Requires the dataframe_browser module.
