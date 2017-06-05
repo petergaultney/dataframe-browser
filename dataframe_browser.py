@@ -142,30 +142,39 @@ class DataframeTableBrowser(object):
         self.change_cbs = list()
         self.view = DataframeRowView(lambda: self.df)
         self.add_change_callback(self.view.df_changed)
-        self._focused_column = 0
+        self._focused_column_index = 0
 
     # TODO Join
     # TODO support displaying index as column. could use -1 as special value to indicate index in place of column name
+    # TODO write out to file.
 
     @property
     def df(self):
         return self.df_hist[-1]
     @property
-    def original_df(self):
-        return self.df_hist[0]
-    @property
     def browse_columns(self):
         return self.browse_columns_history[-1]
+    @property
+    def focused_column_index(self):
+        return self._focused_column_index
+    @property
+    def focused_column(self):
+        return self.browse_columns[self.focused_column_index]
+    @focused_column_index.setter
+    def focused_column_index(self, new_focus_col):
+        assert new_focus_col < len(self.browse_columns) and new_focus_col >= 0
+        self._focused_column_index = new_focus_col
+    @property
+    def selected_row(self):
+        return self.view.selected_row
+
+    # relating to the original backing dataframe...
     @property
     def all_columns(self):
         return list(self.original_df.columns)
     @property
-    def focused_column(self):
-        return self._focused_column
-    @focused_column.setter
-    def focused_column(self, new_focus_col):
-        assert new_focus_col < len(self.browse_columns) and new_focus_col >= 0
-        self._focused_column = new_focus_col
+    def original_df(self):
+        return self.df_hist[0]
 
     def __len__(self):
         return len(self.df)
@@ -240,7 +249,7 @@ class DataframeTableBrowser(object):
         if isinstance(location, int) or isinstance(location, float):
             self.view.jump_to_row(location)
         else: # assume it's a column name
-            self.focused_column = self.browse_columns.index(location)
+            self.focused_column_index = self.browse_columns.index(location)
         self._msg_cbs()
 
     # TODO add redo functionality, to undo an undo.
@@ -292,8 +301,6 @@ class DataframeRowView(object):
         self.view_height = DataframeRowView.DEFAULT_VIEW_HEIGHT
         self.scroll_margin_up = 10 # TODO these are very arbitrary and honestly it might be better
         self.scroll_margin_down = 30 # if they didn't exist inside this class at all.
-        # However, it's worth noting that search functionality requires the idea of a row-wise 'point'
-        # from which the search should begin.
 
     # TODO: str.contains/match
 
@@ -307,6 +314,9 @@ class DataframeRowView(object):
     def selected_relative(self):
         assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self.view_height
         return self._selected_row - self._top_row
+    @property
+    def selected_row(self):
+        return self._selected_row
 
     def header(self, column_name):
         return self._column_cache[column_name].header
@@ -334,12 +344,14 @@ class DataframeRowView(object):
             return True
         return False
 
-    def jump_to_row(self, location):
+    def jump_to_row(self, location, _1_based_indexing=True):
         """location may be either an integer row index or a fraction to be multiplied by the dataframe length."""
         print('jump to row', location)
         if isinstance(location, float):
             assert location >= 0.0 and location <= 1.0
             location = int(location * len(self.df))
+        elif _1_based_indexing:
+            location -= 1
         assert location >= 0 and location <= len(self.df)
         self.scroll_rows(location - self._selected_row)
 
@@ -422,10 +434,10 @@ class DataframeColumnSegmentCache(object):
             self._update_native_width()
         return self.row_strings[top_row-self.top_of_cache : bottom_row-self.top_of_cache]
 
-    def _set_cache(self, string_cache, new_top_of_cache):
-        self.top_of_cache = new_top_of_cache
-        self.row_strings = string_cache
-        self._update_native_width()
+    # def _set_cache(self, string_cache, new_top_of_cache):
+    #     self.top_of_cache = new_top_of_cache
+    #     self.row_strings = string_cache
+    #     self._update_native_width()
 
     def clear_cache(self):
         self.top_of_cache = 0
