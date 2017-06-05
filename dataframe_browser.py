@@ -84,9 +84,6 @@ class MultipleDataframeBrowser(object):
     def __getattr__(self, df_name):
         """This returns the actual backing dataframe."""
         return self.browsers[df_name].df
-    def __setitem__(self, name, df):
-        assert name
-        self.add_df(df, name)
     def __dir__(self):
         """Tab completion of the dataframes for IPython"""
         keys = list(self.browsers.keys())
@@ -186,11 +183,6 @@ class DataframeTableBrowser(object):
             print('messaging cb', cb)
             cb(self)
 
-    def sort_on_columns(self, columns, ascending=True, algorithm='mergesort', na_position=None): # we default to mergesort to stay stable
-        na_position = na_position if na_position is not None else ('last' if ascending else 'first')
-        sorted_df = self.df.sort_values(columns, ascending=ascending, kind=algorithm, na_position=na_position)
-        self._change_df(self.df, sorted_df)
-
     # TODO shouldn't this technically be by name?
     def shift_column(self, col_idx, num_cols_to_right):
         """Moves a column to a new location in the browsing order.
@@ -260,6 +252,11 @@ class DataframeTableBrowser(object):
     def add_change_callback(self, cb):
         if cb not in self.change_cbs:
             self.change_cbs.append(cb)
+
+    def sort_on_columns(self, columns, ascending=True, algorithm='mergesort', na_position=None): # we default to mergesort to stay stable
+        na_position = na_position if na_position is not None else ('last' if ascending else 'first')
+        sorted_df = self.df.sort_values(columns, ascending=ascending, kind=algorithm, na_position=na_position)
+        self._change_df(self.df, sorted_df)
 
     def query(self, query_str):
         # TODO maybe move this into the 'execute command' function
@@ -364,7 +361,7 @@ class DataframeRowView(object):
         if n > 0:
             while self._selected_row > self._top_row + self.scroll_margin_down:
                 self._top_row += 1 # TODO this could be faster
-        elif n < 0:
+        elif n < 0: # scroll up
             while self._selected_row < self._top_row + self.scroll_margin_up and self._top_row > 0:
                 self._top_row -= 1
         assert self._selected_row >= self._top_row and self._selected_row <= self._top_row + self.view_height

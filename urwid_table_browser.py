@@ -368,9 +368,6 @@ class UrwidTableView(urwid.WidgetWrap):
         self.urwid_cols.contents[self.focus_pos] = (self.urwid_cols.contents[self.focus_pos][0],
                                                     _given(self.urwid_cols, self.browser.view.width(self.focus_column)))
 
-    def sort_current_col(self, ascending=True):
-        self.browser.sort_on_columns([self.focus_column], ascending=ascending)
-
     def insert_column(self, col_name, idx=None):
         try:
             if not idx or idx < 0 or idx > self.focus_pos:
@@ -397,14 +394,6 @@ class UrwidTableView(urwid.WidgetWrap):
             pass
         elif key in keybs('hide column'):
             self.hide_current_col()
-        elif key in keybs('search down'):
-            self.urwid_frame.focus_minibuffer('search')
-        elif key in keybs('search up'):
-            self.urwid_frame.focus_minibuffer('search backward')
-        elif key in keybs('sort ascending'):
-            self.sort_current_col(ascending=True)
-        elif key in keybs('sort descending'):
-            self.sort_current_col(ascending=False)
         elif key == 'f':
             pass # filter?
         elif key == 'i':
@@ -422,8 +411,6 @@ class UrwidTableView(urwid.WidgetWrap):
             self.browser.undo()
         elif key in keybs('quit'):
             raise urwid.ExitMainLoop()
-        elif key in keybs('query'):
-            self.urwid_frame.focus_minibuffer('query', column_name=self.focus_column)
         elif key in keybs('page up'):
             self.scroll(-PAGE_SIZE)
         elif key in keybs('page down'):
@@ -453,6 +440,10 @@ class UrwidTableView(urwid.WidgetWrap):
         elif key in keybs('jump to column'):
             self.urwid_frame.focus_minibuffer('jump to column', completer=self._get_completer_with_hint(
                 self.browser.browse_columns))
+        elif key in keybs('search down'):
+            self.urwid_frame.focus_minibuffer('search')
+        elif key in keybs('search up'):
+            self.urwid_frame.focus_minibuffer('search backward')
         elif key in keybs('name current table browser'):
             self.urwid_frame.focus_minibuffer('name current table browser',
                                               default_text=self.multibrowser.current_browser_name)
@@ -460,6 +451,12 @@ class UrwidTableView(urwid.WidgetWrap):
             self.urwid_frame.focus_minibuffer('switch to table browser',
                                               completer=self._get_completer_with_hint(
                                                   self.multibrowser.all_browser_names))
+        elif key in keybs('query'):
+            self.urwid_frame.focus_minibuffer('query', column_name=self.focus_column)
+        elif key in keybs('sort ascending'):
+            self.browser.sort_on_columns([self.focus_column], ascending=True)
+        elif key in keybs('sort descending'):
+            self.browser.sort_on_columns([self.focus_column], ascending=False)
         else:
             self.urwid_frame.hint('got unknown keypress: ' + key)
             return None
@@ -505,7 +502,6 @@ class TableBrowserUrwidLoopFrame:
         self.table_view.update_view()
         self.frame.focus_position = 'body'
         self.minibuffer.focus_removed()
-        # self.modeline.show_basic_commands()
     def keypress(self, size, key):
         raise urwid.ExitMainLoop('keypress in DFbrowser!')
     # def input(self, inpt, raw):
