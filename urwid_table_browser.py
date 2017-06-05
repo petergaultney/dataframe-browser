@@ -72,8 +72,6 @@ class BrowserNamedColumnPile(urwid.Pile):
 
 
 class Modeline(urwid.WidgetWrap):
-    # TODO use modeline to communicate table name, total table length, number of columns,
-    # table percentage at current selection, current row and column number
     doc_attrs = '{name} -- c{current_col}/{cols} - r{current_row}/{rows}({row_percent}%) -- {current_cell}'
     def __init__(self):
         self.text = urwid.Text('Welcome to the Dataframe browser!')
@@ -83,7 +81,8 @@ class Modeline(urwid.WidgetWrap):
     def update_doc_attrs(self, name, cols, rows, current_col, current_row, current_cell):
         self.text.set_text(Modeline.doc_attrs.format(
             name=name, cols=cols, rows=rows, current_col=current_col,
-            current_row=current_row, row_percent=int(100*current_row/rows), current_cell=current_cell))
+            current_row=current_row, row_percent=int(100*current_row/rows),
+            current_cell=current_cell))
     def show_basic_commands(self):
         # help text
         self.set_text('(hjkl) browse; (H)ide col; (u)ndo; (+-) size col; (,.) move col; (ctrl-s)ea(r)ch col; (s)o(r)t')

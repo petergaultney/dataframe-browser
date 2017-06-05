@@ -29,7 +29,7 @@ def browse_dir(directory_of_csvs):
 
 class MultipleDataframeBrowser(object):
     """Create one of these to start browsing pandas Dataframes in a curses-style terminal interface."""
-    def __init__(self, table_browser_frame=None):
+    def __init__(self, *args, table_browser_frame=None):
         global _global_urwid_browser_frame
         if not table_browser_frame:
             if not _global_urwid_browser_frame:
@@ -39,6 +39,8 @@ class MultipleDataframeBrowser(object):
             self.urwid_frame = table_browser_frame
         self.browsers = dict()
         self.active_browser_name = None
+        for df in args:
+            self.add_df(df)
 
     def add_df(self, df, name=None):
         """Direct interface to adding a dataframe.
@@ -76,21 +78,21 @@ class MultipleDataframeBrowser(object):
     def open_new_browser(self, **kwargs):
         pass
 
-    # TODO see if I can figure out how to use setattr and getattr
-    # to make IPython tab-complete the dataframes themselves.
-    # This will probably be difficult as I need it to pass through
-    # to the browser anyway to make sure it's the most recent 'version'
-    # of the dataframe.
-    # def __getitem__(self, df_name):
-    #     """This returns the actual backing dataframe."""
-    #     return self.browsers[df_name].df
-    # def __getattr__(self, df_name):
-    #     """This returns the actual backing dataframe."""
-    #     return self.browsers[df_name].df
-
-    # def __setitem__(self, name, df):
-    #     assert name
-    #     self.add_df(df, name)
+    def __getitem__(self, df_name):
+        """This returns the actual backing dataframe."""
+        return self.browsers[df_name].df
+    def __getattr__(self, df_name):
+        """This returns the actual backing dataframe."""
+        return self.browsers[df_name].df
+    def __setitem__(self, name, df):
+        assert name
+        self.add_df(df, name)
+    def __dir__(self):
+        """Tab completion of the dataframes for IPython"""
+        keys = list(self.browsers.keys())
+        keys += list(dir(type(self)))
+        keys += list(self.__dict__.keys())
+        return keys
 
     def get_browser(self, name):
         return self.browsers[name]
@@ -122,7 +124,7 @@ class MultipleDataframeBrowser(object):
     @property
     def fg(self):
         """Alias for browse"""
-        self.browse()
+        self.browse
 
 
 # the DataframeTableBrowser implements an interface of sorts that
