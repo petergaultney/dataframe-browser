@@ -5,7 +5,7 @@ _commands = { # these commands are specifically for use in the browser
     'search down': ['ctrl s'],
     'search up': ['ctrl r'],
     'sort ascending': ['s'],
-    'sort descending': ['r'],
+    'sort descending': ['S'],
     'browse right': ['right', 'l'],
     'browse left': ['left', 'h'],
     'browse up': ['up', 'k'],
@@ -27,16 +27,29 @@ _commands = { # these commands are specifically for use in the browser
     'jump to first column': ['ctrl a'],
     'name current table browser': ['n'],
     'switch to table browser': ['b'],
+    'jump to column': ['c'],
+    'jump to row': ['r'],
 }
 
-# on startup, verify no duplicate keybindings for developer sanity
+_exception_hints = {
+    'jump to column': 'Could not find column {}',
+    'jump to row': 'Rows may only be indexed by integer or floating point number, and must not be out of range.',
+}
+
+# on startup, verify no duplicate keybindings for developer (my) sanity
 __set_keybs = set()
 for cmd, keybs in _commands.items():
     for keyb in keybs:
         if keyb in __set_keybs:
             print('Attempting to shadow keybinding ' + keyb + ' already in use.')
+        __set_keybs.add(keyb)
 del __set_keybs
 
+def cmd_hint(cmd_str):
+    if cmd_str in _exception_hints:
+        return _exception_hints[cmd_str]
+    else:
+        return 'Command could not be executed.'
 
 def set_keybindings_for_command(command, keybindings):
     """This helps avoid accidentally setting up keybindings that shadow each other"""

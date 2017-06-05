@@ -77,6 +77,13 @@ class ListCompleter:
 
         options = [word if word.startswith(prefix) else None for word in self.words]
         options = [word for word in options if word is not None]
+
+        if len(options) == 0:
+            print('found no options', prefix)
+            # search instead for words that *contain* the 'prefix', and if only one exists,
+            options = [word for word in self.words if prefix in word]
+            print('found these options', options)
+
         self.hint('options: ' + ' '.join(str(t) for t in options))
 
         common_prefix = os.path.commonprefix(options)

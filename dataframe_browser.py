@@ -14,7 +14,7 @@ from gui_debug import *
 _global_urwid_browser_frame = None
 
 def browse(df, name=None):
-    return MultipleDataframeBrowser().add_df(df, name).browse()
+    return MultipleDataframeBrowser().add_df(df, name).browse
 
 
 def browse_dir(directory_of_csvs):
@@ -24,7 +24,7 @@ def browse_dir(directory_of_csvs):
         df = pd.read_csv(directory_of_csvs + os.sep + fn, index_col=False)
         name = fn[:-4]
         mdb.add_df(df, name)
-    return mdb.browse()
+    return mdb.browse
 
 
 class MultipleDataframeBrowser(object):
@@ -54,6 +54,7 @@ class MultipleDataframeBrowser(object):
         name = name.strip()
         print('making new table browser with name ', name)
         self.browsers[name] = DataframeTableBrowser(df)
+        self.browsers[name].add_change_callback(self.urwid_frame.table_view.update_view)
         if not self.active_browser_name:
             self.active_browser_name = name
         return self # for call chaining
@@ -75,17 +76,21 @@ class MultipleDataframeBrowser(object):
     def open_new_browser(self, **kwargs):
         pass
 
-    def __getitem__(self, df_name):
-        """This returns the actual backing dataframe."""
-        return self.browsers[df_name].df
+    # TODO see if I can figure out how to use setattr and getattr
+    # to make IPython tab-complete the dataframes themselves.
+    # This will probably be difficult as I need it to pass through
+    # to the browser anyway to make sure it's the most recent 'version'
+    # of the dataframe.
+    # def __getitem__(self, df_name):
+    #     """This returns the actual backing dataframe."""
+    #     return self.browsers[df_name].df
+    # def __getattr__(self, df_name):
+    #     """This returns the actual backing dataframe."""
+    #     return self.browsers[df_name].df
 
-    def __getattr__(self, df_name):
-        """This returns the actual backing dataframe."""
-        return self.browsers[df_name].df
-
-    def __setitem__(self, name, df):
-        assert name
-        self.add_df(df, name)
+    # def __setitem__(self, name, df):
+    #     assert name
+    #     self.add_df(df, name)
 
     def get_browser(self, name):
         return self.browsers[name]
@@ -108,6 +113,7 @@ class MultipleDataframeBrowser(object):
     def all_browser_names(self):
         return list(self.browsers.keys())
 
+    @property
     def browse(self):
         """This actually brings up the interface. Can be re-entered after it exits and returns."""
         self.urwid_frame.start(self)
@@ -115,6 +121,7 @@ class MultipleDataframeBrowser(object):
 
     @property
     def fg(self):
+        """Alias for browse"""
         self.browse()
 
 
@@ -138,7 +145,7 @@ class DataframeTableBrowser(object):
         self._focused_column = 0
 
     # TODO Join
-    # TODO support displaying index as column.
+    # TODO support displaying index as column. could use -1 as special value to indicate index in place of column name
 
     @property
     def df(self):
@@ -165,6 +172,7 @@ class DataframeTableBrowser(object):
 
     def _msg_cbs(self):
         for cb in self.change_cbs:
+            print('messaging cb', cb)
             cb(self)
 
     def sort_on_columns(self, columns, ascending=True, algorithm='mergesort', na_position=None): # we default to mergesort to stay stable
@@ -174,6 +182,9 @@ class DataframeTableBrowser(object):
 
     # TODO shouldn't this technically be by name?
     def shift_column(self, col_idx, num_cols_to_right):
+        """Moves a column to a new location in the browsing order.
+
+        This doesn't directly change the focus column."""
         new_dcols = shift_list_item(self.browse_columns, col_idx, num_cols_to_right)
         return self._change_display_cols(self.browse_columns, new_dcols)
 
@@ -224,6 +235,14 @@ class DataframeTableBrowser(object):
         """This is delegated to the view because it maintains a convenient string cache."""
         return self.view.search(column, search_string, down, skip_current)
 
+    def jump(self, location):
+        """Location may be an integer row index, a column name, or a percentage of the browser's rows between 0.0 and 1.0"""
+        if isinstance(location, int) or isinstance(location, float):
+            self.view.jump_to_row(location)
+        else: # assume it's a column name
+            self.focused_column = self.browse_columns.index(location)
+        self._msg_cbs()
+
     # TODO add redo functionality, to undo an undo.
     # would only allow redos immediately after undos.
 
@@ -232,6 +251,7 @@ class DataframeTableBrowser(object):
             self.change_cbs.append(cb)
 
     def query(self, query_str):
+        # TODO maybe move this into the 'execute command' function
         print('running query', query_str)
         new_df = self.df.query(query_str)
         print(len(new_df))
@@ -314,11 +334,14 @@ class DataframeRowView(object):
             return True
         return False
 
-    def jump(self, fraction=None, pos=None):
-        if fraction is not None:
-            assert fraction >= 0.0 and fraction <= 1.0
-            pos = fraction * len(self.df)
-        self.scroll_rows(pos - self._selected_row)
+    def jump_to_row(self, location):
+        """location may be either an integer row index or a fraction to be multiplied by the dataframe length."""
+        print('jump to row', location)
+        if isinstance(location, float):
+            assert location >= 0.0 and location <= 1.0
+            location = int(location * len(self.df))
+        assert location >= 0 and location <= len(self.df)
+        self.scroll_rows(location - self._selected_row)
 
     def scroll_rows(self, n):
         """ positive numbers are scroll down; negative are scroll up"""
@@ -355,9 +378,9 @@ class DataframeColumnSegmentCache(object):
         self._min_cache_on_either_side = min_cache_on_either_side
         self._std_cache_size = std_cache_size
     def _update_native_width(self):
-        self.native_width = len(self.column_name)
+        self.native_width = max(len(self.column_name), DataframeColumnSegmentCache.MIN_WIDTH)
         for idx, s in enumerate(self.row_strings):
-            self.native_width = max(self.native_width, len(s))
+            self.native_width = min(DataframeColumnSegmentCache.MAX_WIDTH, max(self.native_width, len(s)))
             self.row_strings[idx] = s.strip()
             if not self.is_numeric and self.row_strings[idx] == 'NaN':
                 self.row_strings[idx] = ''
